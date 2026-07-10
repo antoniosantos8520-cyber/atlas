@@ -1,0 +1,9 @@
+{
+  "name": "atlas",
+  "version": "0.4.0",
+  "private": true,
+  "description": "A.T.L.A.S. — dev/test harness (Foundry loads scripts via module.json; this is only for Node unit tests).",
+  "scripts": {
+    "test": "node --test"
+  }
+}
