@@ -2,7 +2,7 @@
 
 A generic, **any-system** Foundry VTT module for **zone-based fog of war**. Instead of drawing walls, you sketch **rooms**, wire **doors** between them, set per-room **line-of-sight** rules, and the table runs its own fog: each player's screen shows only what *their* token can see, live, as anyone moves — with no manual hiding.
 
-Built for abstract / theatre-of-the-mind "zone" combat (you're either *in* a room or not; exact position inside it doesn't matter). Works in any system; ships with a clean editor panel and a standalone window.
+Built for **tactical zone combat** — a real map and real token positioning, where the unit of position is the **room**, not the 5-foot square: you're in a zone or you're not, distance is measured in room-hops, sight runs zone to zone, and crossing a boundary is what movement *means*. Coarser grain than a grid, every bit as tactical. (It serves theatre-of-the-mind tables just as well — but it isn't limited to that.) Works in any system; ships with a clean editor panel and a standalone window.
 
 > Status: v0.4.0. Extracted and generalized from the Conan/*Blood & Steel* "Albert" area tool.
 > 0.4.0 adds **area effects** — stackable GM conditions on a room (Web / Fire / Smoke) with room tints,
