@@ -1,4 +1,4 @@
-// A.T.L.A.S. — the data layer. Per-SCENE area records live in scene flags under the configured scope.
+// Atlas — the data layer. Per-SCENE area records live in scene flags under the configured scope.
 //
 // Split: the TRANSFORMS below are pure + immutable (return new data, never mutate) so they unit-test in
 // Node; the Foundry I/O wrappers at the bottom are thin (read/write/clear scene flags, find live markers).
@@ -74,7 +74,10 @@ export function removeArea(data, label) {
   const areas = { ...data.areas };
   delete areas[label];
   const connections = (data.connections ?? []).filter(([a, b]) => a !== label && b !== label);
-  return { ...data, areas, connections };
+  const out = { ...data, areas, connections };
+  // a doorway on a connection that no longer exists would sit in the data forever, invisible
+  if (data.doorways?.length) out.doorways = data.doorways.filter(([a, b]) => a !== label && b !== label);
+  return out;
 }
 
 // normalized undirected pair (alphabetical)
@@ -99,8 +102,121 @@ export function toggleConnection(data, a, b) {
     const [s, t] = normalizePair(p, q);
     return !(s === x && t === y);
   });
-  if (connections.length === before.length) connections.push([x, y]);   // wasn't present → add
-  return { ...data, connections };
+  if (connections.length === before.length) {
+    connections.push([x, y]);                                          // wasn't present → add
+    return { ...data, connections };
+  }
+  // ⚠ CUT: a doorway is a rule ON a connection, so it cannot outlive one. Left behind it would
+  //   sit in the data forever, invisible (nothing draws a door on a line that is not there) and
+  //   ready to block sight again the moment the two rooms were rejoined. removeArea already prunes
+  //   for the same reason; this is the other way a connection can end.
+  const out = { ...data, connections };
+  if (data.doorways?.length) {
+    out.doorways = data.doorways.filter(([p, q]) => {
+      const [s, t] = normalizePair(p, q);
+      return !(s === x && t === y);
+    });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// DOORWAYS: a sight block on ONE connection
+// ---------------------------------------------------------------------------
+//
+// A doorway is a rule on a single connection: sight cannot cross it, in EITHER direction. It does
+// NOT disconnect the two rooms, so travel, hop distance and the movement rule are all untouched,
+// and a token walking through never opens it. Turning one off is a deliberate editor change that
+// may reveal actors to everyone with a sight route, so it is never a move-time action.
+//
+// ⚠ Stored in its OWN array beside `connections`, never as a third element on each pair, so every
+//   scene traced before doorways existed reads correctly with nothing to migrate. Arrays replace
+//   wholesale under a setFlag merge, which object keys do not.
+// ⚠ PRESENT MEANS BLOCKED. There is no stored "open doorway", because an open door and no door are
+//   the same thing to sight. Removing the entry IS turning it off.
+
+export function hasDoorway(data, a, b) {
+  const [x, y] = normalizePair(a, b);
+  return (data?.doorways ?? []).some(([p, q]) => {
+    const [s, t] = normalizePair(p, q);
+    return s === x && t === y;
+  });
+}
+
+export function toggleDoorway(data, a, b) {
+  if (a === b) return data;
+  const [x, y] = normalizePair(a, b);
+  const before = data.doorways ?? [];
+  const doorways = before.filter(([p, q]) => {
+    const [s, t] = normalizePair(p, q);
+    return !(s === x && t === y);
+  });
+  if (doorways.length === before.length) doorways.push([x, y]);   // wasn't there → add it, blocking
+  return { ...data, doorways };
+}
+
+/**
+ * The graph SIGHT travels on: every connection except the ones a doorway seals.
+ *
+ * ⚠⚠ TRAVEL, hop distance and the movement rule read `data.connections` and must NEVER read this.
+ *    A doorway that started blocking movement would be the one thing it is specified not to do.
+ */
+export function sightConnections(data) {
+  const doors = data?.doorways ?? [];
+  const links = data?.connections ?? [];
+  if (!doors.length) return links;
+  const key = (a, b) => normalizePair(a, b).join("|");
+  const blocked = new Set(doors.map(([a, b]) => key(a, b)));
+  return links.filter(([a, b]) => !blocked.has(key(a, b)));
+}
+
+// ---------------------------------------------------------------------------
+// BLACKOUT: a room that, as far as the table is concerned, is not there
+// ---------------------------------------------------------------------------
+//
+// Hidden from players entirely: no outline, no label, nothing inside it seen, and sight neither
+// enters it, leaves it, nor crosses it. Movement into it is refused whatever else is true, because
+// it is a secret rather than a route.
+//
+// ⚠ It does NOT write losIn/losOut/losThrough. The GM's own switches are left exactly as they were,
+//   so lifting a blackout restores the room to what it was, not to a default.
+
+export function setBlackout(data, label, on) {
+  if (!data.areas?.[label]) return data;
+  return { ...data, areas: { ...data.areas, [label]: { ...data.areas[label], blackout: !!on } } };
+}
+
+export function isBlackedOut(data, label) { return !!data?.areas?.[label]?.blackout; }
+
+/** Is any room on this map blacked out? The movement gate's cheap way to stay out of the way. */
+export function anyBlackout(data) {
+  return Object.values(data?.areas ?? {}).some((a) => a?.blackout);
+}
+
+/** Movement INTO a blacked-out room is refused, independent of the connection rule. */
+export function blackoutRefuses(data, from, to) {
+  return !!to && to !== from && isBlackedOut(data, to);
+}
+
+// Is a single move from one room to another allowed by the map?
+//
+// ONE HOP, judged on the ENDPOINTS: where a move starts and where it ends must be the
+// same room, or two rooms the map joins. A drag from A to C is refused even when it
+// physically sweeps across B, because reaching C is two moves.
+//
+// Endpoints rather than the path travelled, deliberately. Foundry only hands a gate the
+// intermediate steps of a move on a GRIDDED scene; on a gridless one it hands over the
+// two ends and nothing else. Rooms are traced by hand over a map image, and those scenes
+// are usually gridless, so judging the path would quietly mean one thing on one map and
+// something else on the next.
+//
+// A null end is a token in no room at all: in a gap between polygons, or off the traced
+// part of the map. That is not the map refusing, so it passes. This never invents a room
+// a token was not in. Callers self-gate on a scene with no areas before asking.
+export function stepLegal(data, from, to) {
+  if (from == null || to == null) return true;
+  if (from === to) return true;
+  return hasConnection(data, from, to);
 }
 
 // set an explicit In/Out/Through boolean. ALWAYS store true/false — never delete the key
@@ -152,6 +268,13 @@ export function stackTint(effects = [], defs = {}) {
 }
 
 // set the polygon shape of an area
+/** Slide a polygon by a delta. Flat [x,y,x,y,...], the same shape every room is stored in. */
+export function translateShape(points = [], dx = 0, dy = 0) {
+  const out = [];
+  for (let i = 0; i < points.length; i += 2) out.push(points[i] + dx, points[i + 1] + dy);
+  return out;
+}
+
 export function setShape(data, label, shape) {
   if (!data.areas?.[label]) return data;
   return { ...data, areas: { ...data.areas, [label]: { ...data.areas[label], shape: [...shape] } } };

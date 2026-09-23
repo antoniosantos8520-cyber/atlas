@@ -1,22 +1,24 @@
-// A.T.L.A.S. — markers & rooms (the engine). A "room" is a traced polygon (the area shape); a
+// Atlas — markers & rooms (the engine). A "room" is a traced polygon (the area shape); a
 // "marker" is a small lettered, player-VISIBLE label token dropped inside it. The module owns its
 // own marker actor in its own temp folder (auto-picks a valid actor type — never borrows a system one).
 //
 // Pure helpers (centroid, rectPoints) are unit-tested; the Foundry document work runs at call time only,
 // so this file still imports cleanly in Node.
 import { CONFIG } from "./config.mjs";
-import { labelFontSize, discScale, overlayStyle, LABEL_FS_DEFAULT } from "./settings.mjs";
+import { labelFontSize, discScale, overlayStyle, blackoutStyle, LABEL_FS_DEFAULT } from "./settings.mjs";
 import { clipToPolygon } from "./los.mjs";
 import {
   readAreaData, writeAreaData, setArea, setShape, setLOS, setName, removeArea, defaultAreaRecord,
-  nextLabel, layEffect, removeEffect, stackTint
+  nextLabel, layEffect, removeEffect, stackTint, hasDoorway, translateShape, isBlackedOut
 } from "./data.mjs";
 import { retintFromData } from "./effects.mjs";
+import { roomCardHTML, cardTarget, stageClick, emptyStage, stageDirty } from "./room-card.mjs";
 
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-
-const MARKER_ACTOR_NAME = "ATLAS Area Markers";
-const MARKER_FOLDER = "A.T.L.A.S. (do not delete)";
+const MARKER_ACTOR_NAME = "Atlas Area Markers";
+// ⚠ A WORLD THAT ALREADY HAS ONE KEEPS ITS OLD NAME. ensureMarkerActor finds the actor by its
+//   FLAG and returns before it ever looks a folder up, so renaming this cannot strand an existing
+//   world's labels. Only a world with no marker actor yet gets a folder under the new name.
+const MARKER_FOLDER = "Atlas (do not delete)";
 const MARKER_SHEET_ID = "atlas.AtlasMarkerSheet";   // registered stub sheet key (→ flags.core.sheetClass)
 
 // ---------- pure helpers (testable) ----------
@@ -103,7 +105,53 @@ export function generateLabelTexture(text, fs = LABEL_FS_DEFAULT) {
   return res;
 }
 
+// A small door, drawn once and reused. Generated rather than shipped as a file so the module stays
+// a scripts-and-styles package, the same reason the room labels generate their own textures.
+//
+// ⚠ Drawn UPRIGHT, never rotated to follow its line. A door icon lying on its side reads as a hole
+//   rather than a door, and the line beneath it already says which way the connection runs.
+const DOOR_PX = 30;
+let _door = null;
+export function doorTexture() {
+  if (_door) return _door;
+  const S = DOOR_PX;
+  const c = document.createElement("canvas");
+  c.width = S; c.height = S;
+  const ctx = c.getContext("2d");
+  // a dark disc, so the icon reads over a bright map as well as a dark one
+  ctx.beginPath();
+  ctx.arc(S / 2, S / 2, S / 2 - 1.5, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(13,11,20,0.92)"; ctx.fill();
+  ctx.lineWidth = 2; ctx.strokeStyle = "#5b9bff"; ctx.stroke();
+  // the door leaf
+  const w = S * 0.36, h = S * 0.52, x = (S - w) / 2, y = (S - h) / 2;
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(x, y, w, h, [3, 3, 1, 1]); else ctx.rect(x, y, w, h);
+  ctx.fillStyle = "#ece8fb"; ctx.fill();
+  // and its handle
+  ctx.beginPath();
+  ctx.arc(x + w - 2.6, S / 2 + 1, 1.5, 0, Math.PI * 2);
+  ctx.fillStyle = "#0d0b14"; ctx.fill();
+  _door = c.toDataURL();
+  return _door;
+}
+
 // ---------- the module's own marker actor (temp folder, auto-picked type) ----------
+//
+// ⚠⚠ THE ACTOR IS A PERMISSION ANCHOR, NOT A TOKEN REQUIREMENT. Foundry is perfectly happy with an
+// actorless token: the schema allows it and the canvas draws it. Do NOT "tidy this away" on that
+// basis. TokenDocument#getUserLevel ends
+//     return user.isGM || !this.actorId ? OWNER : NONE;
+// so a token with no actor makes EVERY player its OWNER, and a token carries no ownership field of
+// its own to override that. _canControl needs only canUserModify(user,"update") and _canDrag only
+// wants the select tool, so players could select and DRAG room labels, and a dragged label moves
+// the room, because redrawAreas anchors each polygon to its label's centre. This actor is created
+// with no ownership key, so it defaults to {default: NONE}, and that is the only thing holding the
+// door shut. It was not designed that way; it is load-bearing regardless.
+//
+// ⚠ It is also what keeps Token#_canView truthy, and _canView is the permission clickLeft2 consults.
+// Without an actor it returns undefined and fires a false "Actor no longer exists" toast, so
+// double-clicking a label to open the room panel would simply stop working.
 export async function ensureMarkerActor() {
   const scope = CONFIG.flagScope;
   let actor = game.actors.find(a => a.getFlag?.(scope, "markerActor"));
@@ -130,7 +178,7 @@ function buildMarkerSheetClass() {
   return class AtlasMarkerSheet extends Base {
     static DEFAULT_OPTIONS = {
       classes: ["atlas-marker-sheet"],
-      window: { title: "A.T.L.A.S. Marker", icon: "fa-solid fa-draw-polygon" },
+      window: { title: "Atlas Marker", icon: "fa-solid fa-draw-polygon" },
       position: { width: 340, height: "auto" },
       form: { submitOnChange: false, closeOnSubmit: false },
       sheetConfig: false
@@ -152,69 +200,19 @@ function buildMarkerSheetClass() {
 
     get title() {
       const ctx = this._getRoomContext();
-      return ctx ? `Room ${ctx.label}${ctx.name ? ` — ${ctx.name}` : ""}` : "A.T.L.A.S. Marker";
+      return ctx ? `Room ${ctx.label}${ctx.name ? ` — ${ctx.name}` : ""}` : "Atlas Marker";
     }
 
-    // STAGED edits: LOS toggles + the effect toggles collect on the sheet and commit in ONE write when the
-    // GM hits Apply (which also closes). Closing with ✕ discards. `los` holds only fields that DIFFER from
-    // the committed state; `effects` holds only id→bool DELTAS (true = lay it, false = remove it). Effects
-    // STACK — each button is an independent on/off; the None chip stages everything off.
-    _stage() { return this._staged ??= { los: {}, effects: {} }; }
-    _dirty() { const st = this._stage(); return Object.keys(st.los).length > 0 || Object.keys(st.effects).length > 0; }
+    // STAGED edits: LOS toggles and effect toggles collect on the sheet and commit in ONE write when
+    // the GM hits Apply (which also closes). Closing with ✕ discards. The shapes and the toggle rules
+    // live in ⚓ room-card.mjs, shared with the control panel, which writes through instead of staging.
+    _stage() { return this._staged ??= emptyStage(); }
+    _dirty() { return stageDirty(this._stage()); }
 
+    // ⚓ room-card.mjs owns the markup. `staging: true` is the default: this surface shows the amber
+    // staged state and the Apply footer, where the control panel commits on each click and shows neither.
     async _renderHTML() {
-      const ctx = this._getRoomContext();
-      if (!ctx) {
-        return `<div class="atlas-marker-card">
-          <i class="fa-solid fa-draw-polygon"></i>
-          <h3>Area-label host</h3>
-          <p>This hidden actor only backs the room labels A.T.L.A.S. drops on your scenes. There's nothing to edit here — please don't delete it.</p>
-        </div>`;
-      }
-      const st = this._stage();
-      const tog = (field, label, hint) => {
-        const shown = st.los[field] ?? (ctx.area[field] !== false);
-        const staged = field in st.los;
-        return `<button type="button" class="atlas-mc-tog${shown ? " on" : ""}${staged ? " staged" : ""}" data-atlas-los="${field}" title="${esc(hint)}">
-            <i class="fa-solid ${shown ? "fa-eye" : "fa-eye-slash"}"></i>
-            <span class="atlas-mc-t">${label}</span>
-            <span class="atlas-mc-s">${shown ? "on" : "off"}</span>
-          </button>`;
-      };
-      // Effects STACK — each button shows its own desired state: staged delta if present, else committed.
-      const committed = new Set((ctx.area.effects ?? []).map((e) => e?.id).filter(Boolean));
-      const desired = (id) => st.effects[id] ?? committed.has(id);
-      const fxBtn = (id, def) => {
-        const on = desired(id);
-        return `<button type="button" class="atlas-mc-fx${on ? " on" : ""}${id in st.effects ? " staged" : ""}" data-atlas-fx="${id}"
-            title="${esc(def.label)}${def.los ? " — seals this room's LOS In/Out when applied" : ""}">
-            <i class="fa-solid ${def.icon}"></i><span>${esc(def.label)}</span>
-          </button>`;
-      };
-      const fxIds = Object.keys(CONFIG.areaEffects ?? {});
-      const fxRow = fxIds.map((id) => fxBtn(id, CONFIG.areaEffects[id])).join("");
-      const clearOn = fxIds.every((id) => !desired(id));
-      const dirty = this._dirty();
-      return `<div class="atlas-marker-card atlas-los-card">
-        <div class="atlas-mc-room"><b>${esc(ctx.label)}</b>${ctx.name ? ` · ${esc(ctx.name)}` : ""}</div>
-        <p class="atlas-mc-hint">Stage line-of-sight + effect changes, then Apply. ✕ discards.</p>
-        <div class="atlas-mc-los">
-          ${tog("losIn", "In", "Can this room be seen INTO from outside?")}
-          ${tog("losOut", "Out", "Can tokens in it see / shoot OUT?")}
-          ${tog("losThrough", "Through", "Can sight pass THROUGH it to somewhere beyond?")}
-        </div>
-        <div class="atlas-mc-sec">Effect</div>
-        <div class="atlas-mc-fxrow">
-          ${fxRow}
-          <button type="button" class="atlas-mc-fx clear${clearOn ? " on" : ""}" data-atlas-fx="" title="Stage ALL effects off (LOS stays as it stands — re-toggle by hand)">
-            <i class="fa-solid fa-ban"></i><span>None</span>
-          </button>
-        </div>
-        <div class="atlas-mc-foot">
-          <button type="button" class="atlas-mc-apply" data-atlas-apply ${dirty ? "" : "disabled"}><i class="fa-solid fa-check"></i> Apply</button>
-          <span class="atlas-mc-note">${dirty ? "staged — Apply commits & closes" : "no changes staged"}</span>
-        </div>
-      </div>`;
+      return roomCardHTML(this._getRoomContext(), { staged: this._stage(), defs: CONFIG.areaEffects });
     }
 
     _replaceHTML(result, content) {
@@ -228,30 +226,11 @@ function buildMarkerSheetClass() {
     async _onCardClick(ev) {
       const ctx = this._getRoomContext();
       if (!ctx) return;
-      const st = this._stage();
-      const losBtn = ev.target.closest("[data-atlas-los]");
-      const fxBtn = ev.target.closest("[data-atlas-fx]");
-      const apply = ev.target.closest("[data-atlas-apply]");
-      if (!losBtn && !fxBtn && !apply) return;
+      const hit = cardTarget(ev.target);
+      if (!hit) return;
       ev.preventDefault();
-      if (losBtn) {                                        // stage a toggle; back-to-committed drops the key
-        const field = losBtn.dataset.atlasLos;
-        const cur = ctx.area[field] !== false;
-        const next = !(st.los[field] ?? cur);
-        if (next === cur) delete st.los[field]; else st.los[field] = next;
-      } else if (fxBtn) {                                  // toggle one effect's desired state ("" = the None chip)
-        const committed = new Set((ctx.area.effects ?? []).map((e) => e?.id).filter(Boolean));
-        const id = fxBtn.dataset.atlasFx || null;
-        if (id === null) {                                 // None: stage every effect off
-          st.effects = {};
-          for (const cid of committed) st.effects[cid] = false;
-        } else {
-          const next = !(st.effects[id] ?? committed.has(id));
-          if (next === committed.has(id)) delete st.effects[id]; else st.effects[id] = next;
-        }
-      } else if (apply) {
-        return this._onApply(ctx);
-      }
+      if (hit.kind === "apply") return this._onApply(ctx);
+      stageClick(ctx.area, this._stage(), hit);
       this.render();
     }
 
@@ -268,12 +247,12 @@ function buildMarkerSheetClass() {
       for (const [field, value] of Object.entries(st.los)) data = setLOS(data, ctx.label, field, value);
       await writeAreaData(ctx.scene, data);                // one write → fog + editor refresh themselves
       if (fxChanged) await retintFromData(ctx.scene, ctx.label, data);
-      this._staged = { los: {}, effects: {} };
+      this._staged = emptyStage();
       return this.close();
     }
 
     _onClose(options) {
-      this._staged = { los: {}, effects: {} };             // ✕ discards staged edits
+      this._staged = emptyStage();                         // ✕ discards staged edits
       return super._onClose?.(options);
     }
   };
@@ -283,15 +262,15 @@ function buildMarkerSheetClass() {
 export function registerMarkerSheet() {
   const cls = buildMarkerSheetClass();
   const DSC = foundry.applications?.apps?.DocumentSheetConfig ?? globalThis.DocumentSheetConfig;
-  if (!cls || !DSC) { console.warn("ATLAS | ActorSheetV2 / DocumentSheetConfig unavailable — marker keeps the system sheet"); return; }
+  if (!cls || !DSC) { console.warn("Atlas | ActorSheetV2 / DocumentSheetConfig unavailable — marker keeps the system sheet"); return; }
   const types = (game.documentTypes?.Actor ?? []).filter(t => t !== "base");
   try {
-    DSC.registerSheet(Actor, "atlas", cls, { types, makeDefault: false, canBeDefault: false, label: "A.T.L.A.S. Marker" });
-  } catch (e) { console.warn("ATLAS | marker sheet registration failed", e); return; }
+    DSC.registerSheet(Actor, "atlas", cls, { types, makeDefault: false, canBeDefault: false, label: "Atlas Marker" });
+  } catch (e) { console.warn("Atlas | marker sheet registration failed", e); return; }
   // retro-fit an existing marker actor so the fix lands without recreating it
   const actor = game.actors?.find(a => a.getFlag?.(CONFIG.flagScope, "markerActor"));
   if (actor && actor.getFlag("core", "sheetClass") !== MARKER_SHEET_ID) {
-    actor.setFlag("core", "sheetClass", MARKER_SHEET_ID).catch(e => console.warn("ATLAS | marker sheet assign failed", e));
+    actor.setFlag("core", "sheetClass", MARKER_SHEET_ID).catch(e => console.warn("Atlas | marker sheet assign failed", e));
   }
 }
 
@@ -306,7 +285,7 @@ export function installMarkerHoverGuard() {
     const fix = scene.tokens
       .filter(t => t.flags?.[scope]?.areaMarker && !t.flags?.["image-hover"]?.hideArt)
       .map(t => ({ _id: t.id, "flags.image-hover.hideArt": true }));
-    if (fix.length) await scene.updateEmbeddedDocuments("Token", fix).catch(e => console.warn("ATLAS | hideArt retro-fit failed", e));
+    if (fix.length) await scene.updateEmbeddedDocuments("Token", fix).catch(e => console.warn("Atlas | hideArt retro-fit failed", e));
   });
 }
 
@@ -368,11 +347,14 @@ export async function drawRoomOutline(scene, label, points) {
   const old = scene.drawings.filter(d => d.flags?.[scope]?.areaRoom === label).map(d => d.id);
   if (old.length) await scene.deleteEmbeddedDocuments("Drawing", old);
   const locked = !!scene.getFlag(scope, "areasLocked");   // preserve lock across redraws
-  const tint = stackTint(readAreaData(scene).areas?.[label]?.effects, CONFIG.areaEffects);
+  const data = readAreaData(scene);
+  const tint = stackTint(data.areas?.[label]?.effects, CONFIG.areaEffects);
+  // ⚠ A hidden room keeps its hatch through a redraw. Building the style from the effect tint alone
+  //   meant Redraw, and now a move, handed a blacked-out room an ordinary room's look.
   await scene.createEmbeddedDocuments("Drawing", [{
     x: 0, y: 0, locked,
     shape: { type: "p", points: [...points] },
-    ...overlayStyle(tint),
+    ...(isBlackedOut(data, label) ? blackoutStyle() : overlayStyle(tint)),
     strokeWidth: 3,
     sort: -9998,
     flags: { [scope]: { areaRoom: label } }
@@ -380,6 +362,31 @@ export async function drawRoomOutline(scene, label, points) {
 }
 
 // ---------- connection LINES (line of travel — room to room, drawn for everyone) ----------
+/**
+ * Slide a room: its polygon, its outline, and every line that meets it.
+ *
+ * ⚠ THE LABEL DOES NOT RIDE ALONG (user, 2026-09-23: "if i click move and move the box do not also
+ *   move the lable ... i would like to be able to move lables around independtaly of the box"). A
+ *   label is a name plate you put where it reads best, not a pin the room hangs from. Dragging the
+ *   label moves only the label; this moves only the room.
+ * ⚠ That is ONLY safe because Redraw no longer re-anchors polygons to label centres. If that ever
+ *   comes back, every independently placed label starts dragging its room around again.
+ */
+export async function moveArea(scene, label, dx, dy) {
+  scene = scene ?? canvas.scene;
+  if (!game.user?.isGM || !scene) return null;
+  const data = readAreaData(scene);
+  const shape = data.areas?.[label]?.shape;
+  if (!shape?.length) return null;
+
+  const moved = translateShape(shape, dx, dy);
+  await writeAreaData(scene, setShape(data, label, moved));
+
+  await drawRoomOutline(scene, label, moved);
+  await drawConnections(scene);                    // the lines meet the room's new edge
+  return label;
+}
+
 export async function drawConnections(scene) {
   scene = scene ?? canvas.scene;
   if (!game.user?.isGM) return;
@@ -400,8 +407,27 @@ export async function drawConnections(scene) {
       x: 0, y: 0, locked,
       shape: { type: "p", points: [start.x, start.y, end.x, end.y] },
       strokeColor: "#ffffff", strokeAlpha: 0.7, strokeWidth: 5, fillType: 0,
-      sort: -9997, flags: { [scope]: { areaLine: true } }
+      // ⚠ THE PAIR IS STAMPED ON THE DRAWING. A line is a document every client receives, and
+      //   blackout.mjs has to decide per client whether to paint it, which it cannot do from a
+      //   bare "this is a line" flag. Without the pair a hidden room still had white lines
+      //   converging on an empty patch of map, which is most of the way to giving it away.
+      sort: -9997, flags: { [scope]: { areaLine: true, areaPair: `${a}|${b}` } }
     });
+    // A DOORWAY rides the middle of its own line. It is built here, in the same sweep that rebuilds
+    // the lines, so it can never be left behind on a connection that moved or went away: everything
+    // flagged areaLine is deleted at the top of this function and made again from the data.
+    // ⚠ The rect is exactly the texture's size, so a PATTERN fill tiles it precisely once.
+    if (hasDoorway(data, a, b)) {
+      const mx = (start.x + end.x) / 2, my = (start.y + end.y) / 2;
+      draws.push({
+        x: Math.round(mx - DOOR_PX / 2), y: Math.round(my - DOOR_PX / 2), locked,
+        shape: { type: "r", width: DOOR_PX, height: DOOR_PX },
+        fillType: 2, texture: doorTexture(), fillColor: "#ffffff", fillAlpha: 1,
+        strokeAlpha: 0, strokeWidth: 0,
+        sort: -9996,                                  // just above its line, still under every token
+        flags: { [scope]: { areaLine: true, areaDoor: `${a}|${b}`, areaPair: `${a}|${b}` } }
+      });
+    }
   }
   if (draws.length) await scene.createEmbeddedDocuments("Drawing", draws);
 }
@@ -409,23 +435,19 @@ export async function drawConnections(scene) {
 // ---------- redraw: re-anchor each room to its (possibly moved) letter marker, then refresh ----------
 // Move a room by dragging its letter token, then hit Redraw: the polygon translates so its centroid
 // follows the marker, and outlines + connection lines are rebuilt.
+/**
+ * Repaint every room outline and every connection line from the stored shapes.
+ *
+ * ⚠⚠ THIS USED TO MOVE ROOMS. It re-anchored each polygon to its label's centre, which was how a
+ *    room was moved before move mode existed: drag the label, then press this. That is gone (user,
+ *    2026-09-23), because labels are now placed freely and re-anchoring would have dragged every
+ *    room to wherever its name plate happened to look best. Move a room with MOVE MODE instead.
+ *    What is left is a repair: rebuild the drawings when one has been deleted or has drifted.
+ */
 export async function redrawAreas(scene) {
   scene = scene ?? canvas.scene;
   if (!game.user?.isGM) return;
-  const scope = CONFIG.flagScope;
-  let data = readAreaData(scene);
-  const g = canvas.grid.size;
-  for (const [label, area] of Object.entries(data.areas || {})) {
-    const tok = scene.tokens.find(t => t.flags?.[scope]?.areaMarker?.label === label);
-    if (!tok || !area.shape?.length) continue;
-    const mcx = tok.x + ((tok.width || 1) * g) / 2;     // marker centre (current position)
-    const mcy = tok.y + ((tok.height || 1) * g) / 2;
-    const c = centroid(area.shape);
-    const ddx = mcx - c.x, ddy = mcy - c.y;
-    if (Math.abs(ddx) < 0.5 && Math.abs(ddy) < 0.5) continue;   // marker hasn't moved → leave it
-    data = setShape(data, label, area.shape.map((v, i) => (i % 2 === 0 ? v + ddx : v + ddy)));
-  }
-  await writeAreaData(scene, data);
+  const data = readAreaData(scene);
   for (const [label, area] of Object.entries(data.areas || {})) {
     if (area.shape?.length) await drawRoomOutline(scene, label, area.shape);
   }
@@ -435,8 +457,14 @@ export async function redrawAreas(scene) {
 // ---------- lock/unlock the marker tokens (GM safety so they aren't bumped) ----------
 export async function toggleLock(scene) {
   scene = scene ?? canvas.scene;
+  return setLock(scene, !scene.getFlag(CONFIG.flagScope, "areasLocked"));
+}
+
+/** Lock or unlock every room, label and line. Move mode borrows this and puts it back after. */
+export async function setLock(scene, next) {
+  scene = scene ?? canvas.scene;
   const scope = CONFIG.flagScope;
-  const next = !scene.getFlag(scope, "areasLocked");
+  next = !!next;
   const toks = scene.tokens.filter(t => t.flags?.[scope]?.areaMarker).map(t => ({ _id: t.id, locked: next }));
   if (toks.length) await scene.updateEmbeddedDocuments("Token", toks);
   // lock the room outlines + travel lines too — not just the labels — so nothing gets bumped
@@ -451,16 +479,40 @@ export async function toggleLock(scene) {
 // ---------- the combined "make a room from a traced polygon" call ----------
 export async function placeRoom(scene, points, label, name = "") {
   scene = scene ?? canvas.scene;
-  if (!points || points.length < 6) { ui.notifications?.warn("ATLAS: a room needs at least 3 points."); return null; }
+  if (!points || points.length < 6) { ui.notifications?.warn("Atlas: a room needs at least 3 points."); return null; }
   const data = readAreaData(scene);
   label = label ?? nextLabel(data);
-  if (!label) { ui.notifications?.warn("ATLAS: could not allocate an area label."); return null; }
+  if (!label) { ui.notifications?.warn("Atlas: could not allocate an area label."); return null; }
   await writeAreaData(scene, setArea(data, label, defaultAreaRecord(label, points, name)));
   const c = centroid(points);
   await dropLabel(scene, label, c.x, c.y, name);
   await drawRoomOutline(scene, label, points);
   await drawConnections(scene);
   return label;
+}
+
+/**
+ * Replace a room's OUTLINE and nothing else.
+ *
+ * Its letter, its name, its In/Out/Through, its effects, its blackout, its connections and the
+ * doorways on them are all untouched, which is the whole point: a room traced badly the first time
+ * can be traced again without being rebuilt (user, 2026-09-23: "all the other settings connect to
+ * the new drawing").
+ *
+ * ⚠ THE LABEL DOES NOT FOLLOW. It is a name plate placed by hand, exactly as for a move.
+ * ⚠ Connection lines are clipped to each room's EDGE, so every line touching this room is wrong
+ *   the moment its outline changes. drawConnections rebuilds the lot from the data.
+ */
+export async function reshapeRoom(scene, label, points) {
+  scene = scene ?? canvas.scene;
+  if (!game.user?.isGM || !scene) return false;
+  if (!points || points.length < 6) { ui.notifications?.warn("Atlas: a room needs at least 3 points."); return false; }
+  const data = readAreaData(scene);
+  if (!data.areas?.[label]) { ui.notifications?.warn(`Atlas: room ${label} is not on this scene.`); return false; }
+  await writeAreaData(scene, setShape(data, label, points));
+  await drawRoomOutline(scene, label, points);
+  await drawConnections(scene);
+  return true;
 }
 
 // ---------- rename ----------
@@ -512,7 +564,10 @@ export async function removeMarker(scene, label) {
   const pruned = removeArea(readAreaData(scene), label);
   await scene.update({
     [`flags.${scope}.areaData.areas.-=${label}`]: null,
-    [`flags.${scope}.areaData.connections`]: pruned.connections
+    [`flags.${scope}.areaData.connections`]: pruned.connections,
+    // ⚠ and its DOORWAYS. removeArea prunes them, but this write only carried the connections, so a
+    //   deleted room left its sight blocks behind on links that no longer existed.
+    ...(pruned.doorways ? { [`flags.${scope}.areaData.doorways`]: pruned.doorways } : {}),
   });
   await drawConnections(scene);                                   // re-draw travel lines without the dropped room
 }

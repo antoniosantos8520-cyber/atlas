@@ -1,18 +1,24 @@
 {
   "id": "atlas",
-  "title": "A.T.L.A.S.: Area Tactical Line-of-sight Awareness System",
-  "description": "Generic, any-system zone-based fog of war: trace rooms, wire doors, set In/Out/Through line-of-sight, and tokens hide/reveal live per-player as they move. Plus stackable GM area EFFECTS (web/fire/smoke) with room tints and per-effect LOS writes. (Extracted from the Conan area tool, see DC20/AREA-MODULE-PLAN.md.)",
-  "version": "0.5.0",
+  "title": "Atlas: zone-based fog of war",
+  "description": "Generic, any-system zone-based fog of war. Trace the rooms of a map, wire them together, and tokens hide and reveal per player as they move: no wall drawing, no light sources. Per-room In/Out/Through line of sight, doorways that block sight on one connection, blackout to hide a room from the table entirely, optional movement restricted to connected rooms, and stackable area effects (web/fire/smoke) that tint the room.",
+  "version": "1.0.0",
   "compatibility": {
     "minimum": "13",
     "verified": "14"
   },
   "authors": [
-    { "name": "Anton" }
+    {
+      "name": "Anton"
+    }
   ],
-  "esmodules": ["scripts/atlas.mjs"],
-  "styles": ["styles/atlas.css"],
+  "esmodules": [
+    "scripts/atlas.mjs"
+  ],
+  "styles": [
+    "styles/atlas.css"
+  ],
   "url": "https://github.com/antoniosantos8520-cyber/atlas",
   "manifest": "https://github.com/antoniosantos8520-cyber/atlas/releases/latest/download/module.json",
-  "download": "https://github.com/antoniosantos8520-cyber/atlas/releases/download/v0.4.0/atlas.zip"
+  "download": "https://github.com/antoniosantos8520-cyber/atlas/releases/latest/download/atlas.zip"
 }

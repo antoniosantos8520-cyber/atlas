@@ -1,4 +1,4 @@
-// A.T.L.A.S. — how room labels LOOK. Two sliders drive it (settings.mjs):
+// Atlas — how room labels LOOK. Two sliders drive it (settings.mjs):
 //
 //   OPACITY is per-client display only. It sets the resting alpha of a label's
 //   mesh; hovering the ROOM (not the label) takes it to full. Nothing here ever
@@ -8,36 +8,68 @@
 //   the token's width/height in grid units are derived from the drawn pixel box.
 //   Changing it therefore rewrites the marker tokens (rebuildLabels below).
 //
-// ⚠ rebuildLabels preserves each marker's CENTRE to the pixel. Redraw anchors a
-//   room's polygon to its marker centre (marker.mjs redrawAreas), so a resize
-//   that shifted the centre would drag every zone on the next Redraw.
+// ⚠ rebuildLabels preserves each marker's CENTRE to the pixel. A label is put
+//   where it reads best and stays there, so a resize that shifted the centre would
+//   shuffle every name plate on the map the next time the size slider moved.
 //
-// The LETTER is authoring plumbing, and lock is the "done building" signal. While
-// unlocked the GM sees every letter, since a label is a room's only grab handle.
-// Once locked, named rooms shed the letter and keep the name, unnamed rooms show
-// nothing at all, and players never saw a bare letter in the first place. The
-// connection matrix is where letters live permanently.
+// A label is a NAME PLATE. An unnamed room has none at all, for anybody, at any
+// time (targetAlpha below), and the LETTER lives in the room's data rather than on
+// the map: the connection matrix shows it, and so does any host system's own node
+// map. Lock no longer has anything to say about any of it.
 import { CONFIG } from "./config.mjs";
 import { labelOpacity, labelFontSize } from "./settings.mjs";
 import { labelTokenData, labelSig } from "./marker.mjs";
 
 let _hovered = null;      // the room label the cursor is currently over (from tooltip.mjs)
+let _movable = false;     // is move mode running? (pushed in by move-area.mjs)
+
+/**
+ * Move mode started or stopped. Labels answer the pointer only while it is on.
+ *
+ * ⚠ PUSHED IN rather than imported. move-area.mjs already reaches marker.mjs and hit.mjs, and
+ *   hit.mjs reads isNamed from here, so importing move mode INTO this file would close a cycle.
+ */
+export function labelsMovable(on) {
+  const next = !!on;
+  if (next === _movable) return _movable;
+  _movable = next;
+  refreshLabels();
+  return _movable;
+}
 
 const markerOf = (doc) => doc?.flags?.[CONFIG.flagScope]?.areaMarker ?? null;
-const isNamed = (m) => !!(m?.name && String(m.name).trim());
+
+/** Has this room been given a name? The one definition, shared with hit.mjs's label pick. */
+export const isNamed = (m) => !!(m?.name && String(m.name).trim());
 const isLocked = (scene) => !!scene?.getFlag?.(CONFIG.flagScope, "areasLocked");
 
 /**
  * The alpha this label should be wearing right now, or null if it isn't a label.
  *
- * An unnamed room is nothing BUT its letter, which is authoring plumbing: players
- * never see one, and once the map is locked nobody does. That costs the GM nothing,
- * because a locked marker cannot be grabbed anyway. Unlock and the letters return.
+ * ⚠ AN UNNAMED ROOM HAS NO LABEL AT ALL, for anybody, at any time (user, 2026-09-23: "anytime i
+ *   draw a room and do not name it we do not need a lable box for it"). A battlemap traced into a
+ *   dozen rooms should not be carpeted in letters nobody needs, and the letter is not lost: it
+ *   still lives in the room's data, so the almanac's node map and the editor's matrix both keep it.
+ *   Name the room and its label appears.
+ *
+ * ⚠ The letter used to double as the GM's grab handle for moving a room. It no longer needs to:
+ *   move mode picks a room up from anywhere inside it, and clicking anywhere inside one points the
+ *   panel at it. The token itself still exists and is still clickable, because this writes
+ *   mesh.alpha rather than the token's own, so nothing structural depends on it being visible.
+ *
+ * ⚠ HOVER ONLY LIFTS A LABEL WHILE MOVE MODE IS ON (user, 2026-09-23: "when i am in a normal game
+ *   those lables and hidden letters still highlight and it makes the map still seem cluttered").
+ *   Brightening a name plate answers the question "which one am I about to grab", and outside move
+ *   mode nobody is grabbing anything: it is just the map twitching as the cursor crosses it.
  */
-export function targetAlpha(marker, { hovered = null, isGM = false, opacity = 1, locked = false } = {}) {
+export function targetAlpha(marker, { hovered = null, isGM = false, opacity = 1, blackout = false, movable = false } = {}) {
   if (!marker) return null;
-  if (!isNamed(marker) && (locked || !isGM)) return 0;
-  return marker.label && marker.label === hovered ? 1 : opacity;
+  // ⚠ A hidden room has no label at the table, named or not, hovered or not. This is the FIRST
+  //   test on purpose: every rule below it is about how prominent a label should be, and a blacked
+  //   out room's label should not be there at all.
+  if (blackout && !isGM) return 0;
+  if (!isNamed(marker)) return 0;
+  return (movable && marker.label && marker.label === hovered) ? 1 : opacity;
 }
 
 function applyTo(token) {
@@ -45,12 +77,20 @@ function applyTo(token) {
   // the overwhelmingly common case before touching settings or the mesh.
   const marker = markerOf(token?.document);
   if (!marker || !token.mesh) return;
+  const scene = token.document.parent;
   token.mesh.alpha = targetAlpha(marker, {
     hovered: _hovered,
     isGM: !!game.user?.isGM,
     opacity: labelOpacity(),
-    locked: isLocked(token.document.parent)
+    movable: _movable,
+    blackout: !!scene?.flags?.[CONFIG.flagScope]?.areaData?.areas?.[marker.label]?.blackout
   });
+  // ⚠ ⚠ AND THE BORDER FOUNDRY DRAWS FOR US. Token#_refreshState sets border.visible from
+  //    `controlled || hover`, and it knows nothing about mesh.alpha, so an UNNAMED room's label,
+  //    invisible in every other respect, still flashed a white box as the cursor crossed it. That
+  //    is the "hidden letters" a Keeper sees twitching all over a busy map. Outside move mode a
+  //    label is furniture and answers the pointer with nothing at all.
+  if (token.border) token.border.visible = _movable && token.border.visible;
 }
 
 /** Re-apply resting/hover alpha to every label on the canvas. */
@@ -97,7 +137,7 @@ export async function rebuildLabels(scene) {
   }
   if (updates.length) {
     await scene.updateEmbeddedDocuments("Token", updates)
-      .catch((e) => console.warn("ATLAS | label rebuild failed", e));
+      .catch((e) => console.warn("Atlas | label rebuild failed", e));
   }
   refreshLabels();
 }

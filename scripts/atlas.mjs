@@ -1,6 +1,6 @@
-// A.T.L.A.S. — Area Tactical Line-of-sight Awareness System.
+// Atlas.
 // Generic, any-system zone-based fog of war / area line-of-sight for Foundry VTT.
-// Full design + build plan: DC20/AREA-MODULE-PLAN.md (and the two companion docs).
+// Build plan and the decisions behind it: docs/0.6.0-build.md. User manual: docs/.
 //
 // Entry point. Wires the runtime; exposes the API. (los.mjs/data.mjs are pure + tested;
 // runtime.mjs is the per-client visibility engine. editor.mjs/marker.mjs land in later phases.)
@@ -8,26 +8,33 @@ import { CONFIG, configure } from "./config.mjs";
 import { installRuntime, refresh as refreshVisibility } from "./runtime.mjs";
 import { installTooltip } from "./tooltip.mjs";
 import { hasLOS, tokenArea, areaAtPoint, distance } from "./los.mjs";
-import { readAreaData } from "./data.mjs";
+import { readAreaData, sightConnections } from "./data.mjs";
 import { placeRoom, removeMarker, clearAllAreas, rectPoints, renameArea, registerMarkerSheet, installMarkerHoverGuard } from "./marker.mjs";
 import { applyAreaEffect, removeAreaEffect, readAreaEffects, restyleOutlines } from "./effects.mjs";
 import { initTrace } from "./trace.mjs";
 import { installEditor, registerControls, renderEditorInto, openEditorWindow } from "./editor.mjs";
 import { registerSettings } from "./settings.mjs";
+import { installMovement } from "./movement.mjs";
+import { openRoomPanel, installRoomPanel, refreshRoomPanel } from "./room-panel.mjs";
+import { installBlackout } from "./blackout.mjs";
+import { installMoveArea } from "./move-area.mjs";
+import { installPairMode } from "./pair.mjs";
 import { installLabels, rebuildLabels, refreshLabels } from "./labels.mjs";
 
 const MODULE_ID = "atlas";
 
-// The public API surface a host system (e.g. JLU's Editor) can call.
+// The public API surface a host system's own tools can call.
 const ATLAS = {
   id: MODULE_ID,
-  version: "0.5.0",
+  // ⚠ READ FROM THE MANIFEST, never a second copy. This shipped wrong once already: the literal
+  //   said 0.3.0 against a 0.4.0 manifest, because a release bumped one and not the other.
+  get version() { return game.modules?.get(MODULE_ID)?.version ?? "1.0.0"; },
   get config() { return CONFIG; },
   configure,                                                   // configure({ flagScope, isOwnView, filterToken, extraAreas, ... })
   refresh() { return refreshVisibility(); },                   // force an immediate visibility recompute (after a host toggles a sense effect)
   hasLOS(scene, from, to) {                                    // convenience LOS query for a scene
     const d = readAreaData(scene);
-    return hasLOS(d.connections || [], from, to, d.areas);
+    return hasLOS(sightConnections(d), from, to, d.areas);   // ⚠ SIGHT graph: doorways removed
   },
   // --- area queries (for host movement-cost / positioning systems) ---
   hasAreas(scene) {                                            // does this scene have any traced areas?
@@ -63,6 +70,8 @@ const ATLAS = {
   // --- editor (Phase 6) ---
   renderEditor(el, scene) { return renderEditorInto(el, scene ?? canvas.scene); },  // mount the panel into a host element
   openEditor() { return openEditorWindow(); },                                      // standalone window
+  // one window that FOLLOWS the room you are working on, instead of a dialog per room
+  openRoomPanel(label) { return openRoomPanel(label ?? null); },
   // --- labels (opacity + size are user settings; these force an immediate apply) ---
   rebuildLabels(scene) { return rebuildLabels(scene ?? canvas.scene); },            // redraw label textures at the current size slider
   refreshLabels() { return refreshLabels(); },                                      // re-apply resting/hover opacity now
@@ -73,7 +82,7 @@ const ATLAS = {
 globalThis.ATLAS = ATLAS;
 
 Hooks.once("init", () => {
-  console.log("ATLAS | init");
+  console.log("Atlas | init");
   const mod = game.modules.get(MODULE_ID);
   if (mod) mod.api = ATLAS;
   // label size moves the textures (a document rewrite) and overlay colour/opacity
@@ -81,17 +90,18 @@ Hooks.once("init", () => {
   registerSettings({
     onRebuild: () => rebuildLabels(canvas.scene),
     onRefresh: () => refreshLabels(),
-    onOverlay: () => restyleOutlines(canvas.scene)
+    onOverlay: () => restyleOutlines(canvas.scene),
+    onTraffic: () => refreshRoomPanel()        // the room panel draws this rule as a switch
   });
 });
 
 // install the runtime once classes exist (before the canvas draws tokens), plus the hover readout,
 // the editor's live-refresh hook, the trace cleanup hook, and the GM scene-control button
-Hooks.once("setup", () => { installRuntime(); installTooltip(); installEditor(); initTrace(); installMarkerHoverGuard(); installLabels(); });
+Hooks.once("setup", () => { installRuntime(); installTooltip(); installEditor(); initTrace(); installMarkerHoverGuard(); installLabels(); installMovement(); installRoomPanel(); installBlackout(); installMoveArea(); installPairMode(); });
 
 registerControls();
 
 Hooks.once("ready", () => {
   registerMarkerSheet();                        // stub sheet for the marker actor (no full system sheet)
-  console.log(`ATLAS | ready (v${ATLAS.version}) — runtime active`);
+  console.log(`Atlas | ready (v${ATLAS.version}) — runtime active`);
 });

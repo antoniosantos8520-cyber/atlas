@@ -1,4 +1,4 @@
-/* A.T.L.A.S. — styles, scoped under .atlas-* / #atlas-*. Editor UI styles land in Phase 6. */
+/* Atlas — styles, scoped under .atlas-* / #atlas-*. Editor UI styles land in Phase 6. */
 
 /* Hover readout — range + a sight eye, from your selected token's room. Two glyphs,
    so it is sized to sit over a map without covering it. */
@@ -84,6 +84,133 @@
 }
 .atlas-ed input.atlas-rn-in::placeholder { color: #6a6480; font-style: italic; }
 
+/* ---- room control panel (one window, re-targeted; write-through) ---- */
+/* The card brings its own padding, exactly as on the marker sheet. Without this Foundry's own
+   16px lands on top of it and the effect chips lose about a third of their width. */
+.atlas-room-panel .window-content { padding: 0; overflow-y: auto; overflow-x: hidden; }
+/* Write-through mode drops the hint paragraph, and its margin was the ONLY gap between the room
+   name and the sight toggles. Put the gap back on the row itself. That row is the letter AND the
+   name field side by side, so it lays them out rather than stacking a readout above an editor. */
+.atlas-room-panel .atlas-los-card .atlas-mc-room {
+  display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 12px;
+}
+/* The editor's name field is styled under .atlas-ed, which only the editor emits, so the panel's
+   needs its own rule or it falls back to core's input and arrives too tall with a shadow. Selector
+   carries the container for the same reason the editor's does: to outrank core. */
+.atlas-room-panel input.atlas-mc-name {
+  /* ⚠ ONE flex declaration, and one width. This rule carried TWO of each after successive edits,
+     and the later "flex: none" silently beat an earlier "flex: 0 1 260px", so a fix to the field's
+     width appeared to do nothing at all. Keep every property stated once. */
+  flex: none; width: 170px; min-width: 0; box-sizing: border-box; margin: 0;
+  font-weight: 400; font-size: 12px; font-family: inherit; color: #9fc0ef;
+  height: 22px; min-height: 0; padding: 0 6px;
+  text-align: center;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12);
+  border-radius: 3px; box-shadow: none;
+}
+.atlas-room-panel input.atlas-mc-name:hover { border-color: rgba(61,123,208,.6); }
+.atlas-room-panel input.atlas-mc-name:focus {
+  outline: none; color: #fff; border-color: #3d7bd0; background: rgba(61,123,208,.14);
+}
+.atlas-room-panel input.atlas-mc-name::placeholder { color: #6a6480; font-style: italic; }
+/* Hide-this-room sits on the room's own row, to the right of its name. Muted until it is ON, and
+   then unmistakable: a room you have taken away from the table should never be a subtle state. */
+.atlas-room-panel .atlas-mc-dark {
+  flex: none; width: 26px; height: 22px; padding: 0; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12);
+  border-radius: 3px; box-shadow: none; color: #8d86a8; cursor: pointer;
+}
+.atlas-room-panel .atlas-mc-dark i { font-size: 12px; color: inherit; }
+.atlas-room-panel .atlas-mc-dark:hover { border-color: rgba(61,123,208,.6); color: #ece8fb; }
+.atlas-room-panel .atlas-mc-dark.on {
+  background: #0d0b14; border-color: #5b9bff; color: #5b9bff;
+}
+/* Put-a-doorway-here sits beside it, same size, same resting look. ARMED is deliberately loud:
+   the panel has changed what your next click on the map will do, and that must not be subtle. */
+/* Move mode leads the row and is the loudest control on the card, because it is the only one that
+   changes what the whole MAP does rather than what this one room is. */
+.atlas-room-panel .atlas-mc-move {
+  flex: none; width: 26px; height: 22px; padding: 0; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12);
+  border-radius: 3px; box-shadow: none; color: #8d86a8; cursor: pointer;
+}
+.atlas-room-panel .atlas-mc-move i { font-size: 12px; color: inherit; }
+.atlas-room-panel .atlas-mc-move:hover { border-color: rgba(61,123,208,.6); color: #ece8fb; }
+.atlas-room-panel .atlas-mc-move.on {
+  background: rgba(91,155,255,.2); border-color: #5b9bff; color: #5b9bff;
+}
+
+/* Delete is last, and the only control on the card wearing a warning colour, because it is the
+   only one that pressing again does not undo. */
+.atlas-room-panel .atlas-mc-kill {
+  flex: none; width: 26px; height: 22px; padding: 0; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(196,49,61,.12); border: 1px solid rgba(196,49,61,.4);
+  border-radius: 3px; box-shadow: none; color: #c4313d; cursor: pointer;
+}
+.atlas-room-panel .atlas-mc-kill i { font-size: 12px; color: inherit; }
+.atlas-room-panel .atlas-mc-kill:hover { background: rgba(196,49,61,.5); border-color: #c4313d; color: #fff; }
+
+.atlas-room-panel .atlas-mc-door {
+  flex: none; width: 26px; height: 22px; padding: 0; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12);
+  border-radius: 3px; box-shadow: none; color: #8d86a8; cursor: pointer;
+}
+.atlas-room-panel .atlas-mc-door i { font-size: 12px; color: inherit; }
+.atlas-room-panel .atlas-mc-door:hover { border-color: rgba(61,123,208,.6); color: #ece8fb; }
+.atlas-room-panel .atlas-mc-door.armed {
+  background: rgba(224,166,63,.18); border-color: #e0a63f; color: #e0a63f;
+}
+.atlas-room-panel .atlas-mc-arm {
+  margin: 0 0 10px !important; font-size: 11px; color: #e0a63f;
+}
+
+/* ---- CONNECT MODE's readout: two slots and a dash, following the cursor ----
+   It sits BELOW and right of the pointer, unlike the distance readout which sits above a room's
+   label, because this one is about the cursor itself and must not cover the room being aimed at. */
+#atlas-connect-readout {
+  position: absolute;
+  z-index: 1001;
+  transform: translate(14px, 14px);
+  display: flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: 5px;
+  font-family: system-ui, "Signika", sans-serif;
+  font-size: 13px; font-weight: 800;
+  pointer-events: none;
+  background: #15131e; border: 2px solid #3d7bd0; color: #d6e4f7;
+  box-shadow: 0 2px 8px rgba(0,0,0,.5);
+}
+#atlas-connect-readout i { font-size: 11px; color: #7fb2f0; }
+#atlas-connect-readout .atlas-cn-a,
+#atlas-connect-readout .atlas-cn-b { font-weight: 900; min-width: 10px; text-align: center; }
+#atlas-connect-readout .atlas-cn-d { opacity: .5; font-weight: 400; }
+/* The verb, and the whole pill with it, says what the click would DO. One gesture that both joins
+   and cuts has to say which, or a GM cuts the corridor they meant to add. */
+#atlas-connect-readout .atlas-cn-v {
+  margin-left: 3px; padding: 0 5px; border-radius: 3px;
+  font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;
+}
+#atlas-connect-readout.atlas-join { border-color: #4caf50; color: #cdeccd; }
+#atlas-connect-readout.atlas-join i { color: #4caf50; }
+#atlas-connect-readout.atlas-join .atlas-cn-v { background: rgba(76,175,80,.3); color: #cdeccd; }
+/* A doorway needs a connection to sit on. Amber says "this pair cannot take one", which the
+   one-shot doorway could only tell you AFTER you clicked. */
+#atlas-connect-readout.atlas-warn { border-color: #e0a63f; color: #e0a63f; }
+#atlas-connect-readout.atlas-warn i { color: #e0a63f; }
+#atlas-connect-readout.atlas-warn .atlas-cn-v { background: rgba(224,166,63,.25); color: #f2d9a6; }
+#atlas-connect-readout.atlas-cut { border-color: #c4313d; color: #f0c9cd; }
+#atlas-connect-readout.atlas-cut i { color: #c4313d; }
+#atlas-connect-readout.atlas-cut .atlas-cn-v { background: rgba(196,49,61,.35); color: #f0c9cd; }
+
+/* the empty panel: the placeholder text keeps the card's centred look, the Map row below it does not */
+.atlas-room-panel .atlas-mc-empty { text-align: center; padding: 6px 0 2px; }
+.atlas-room-panel .atlas-mc-empty i { font-size: 28px; color: #3d7bd0; }
+.atlas-room-panel .atlas-mc-empty h3 { margin: 10px 0 6px; font-size: 15px; font-weight: 800; }
+.atlas-room-panel .atlas-mc-empty p { margin: 0; font-size: 12px; opacity: .75; line-height: 1.5; }
+
 /* ---- marker actor stub sheet (opened instead of the full system sheet) ---- */
 .atlas-marker-sheet .window-content { padding: 0; }
 .atlas-marker-card { padding: 20px 22px; color: #ece8fb; text-align: center; font-family: system-ui, "Signika", sans-serif; }
@@ -123,6 +250,40 @@
 .atlas-mc-fx.on { background: rgba(61,123,208,.18); border-color: #3d7bd0; color: #d6e4f7; }
 .atlas-mc-fx.on i { color: #7fb2f0; }
 .atlas-mc-fx.clear.on { background: rgba(196,49,61,.14); border-color: #c4313d; color: #f0c9cd; }
+/* ---- the MAP row, under the effects ----
+   Six buttons in the chip shape the effects use, one size down, because six have to sit where four
+   did. Everything here is a MODE or a RULE rather than a value, so each one states which it is:
+   plain = idle, blue = the resting choice of a pair, AMBER = armed, and your next action on the map
+   means something different from what it meant a moment ago. */
+.atlas-mc-maprow { display: flex; gap: 5px; }
+.atlas-mc-mb {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 7px 2px; border-radius: 8px; cursor: pointer;
+  background: #15131e; border: 1px solid rgba(255,255,255,.14); color: #8d86a8;
+  font-size: 10px; font-weight: 700; line-height: 1.1;
+}
+.atlas-mc-mb i { font-size: 14px; }
+.atlas-mc-mb span { white-space: nowrap; }
+.atlas-mc-mb:hover { border-color: #3d7bd0; }
+.atlas-mc-mb.on { background: rgba(61,123,208,.18); border-color: #3d7bd0; color: #d6e4f7; }
+.atlas-mc-mb.on i { color: #7fb2f0; }
+/* Same amber as the doorway button wears, and for the same reason: the panel has changed what your
+   next click on the map will do, and that must never be subtle. */
+.atlas-mc-mb.armed { background: rgba(224,166,63,.18); border-color: #e0a63f; color: #e0a63f; }
+.atlas-mc-mb.armed i { color: #e0a63f; }
+
+/* TRAFFIC is the one control on the card that is never grey. It is a light, and a light that is off
+   tells you nothing: red means the connections are being enforced, green means they are not. The
+   selectors carry the panel so they outrank .atlas-mc-mb.on above. */
+.atlas-room-panel .atlas-mc-traffic.stop {
+  background: rgba(196,49,61,.16); border-color: #c4313d; color: #e79aa1;
+}
+.atlas-room-panel .atlas-mc-traffic.stop i { color: #c4313d; }
+.atlas-room-panel .atlas-mc-traffic.go {
+  background: rgba(76,175,80,.14); border-color: #4caf50; color: #cdeccd;
+}
+.atlas-room-panel .atlas-mc-traffic.go i { color: #4caf50; }
+
 /* the Apply footer */
 .atlas-mc-foot { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
 .atlas-mc-apply {

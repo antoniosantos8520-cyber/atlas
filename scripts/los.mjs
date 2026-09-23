@@ -1,4 +1,4 @@
-// A.T.L.A.S. — pure line-of-sight + geometry core. NO Foundry dependencies, so it unit-tests in Node.
+// Atlas — pure line-of-sight + geometry core. NO Foundry dependencies, so it unit-tests in Node.
 // This is the load-bearing math; everything else (runtime, editor) builds on it.
 //
 // Per-scene data shape these functions operate on:
@@ -20,7 +20,8 @@ export function buildAdjacency(connections = []) {
 
 // The areas directly connected (1 hop) to `from` — a single label, or a Set/array of labels (the open
 // neighbourhood of a set). Returns a Set. Used by host "sense" effects that reach into adjacent areas
-// regardless of LOS (e.g. Whispers' tremor sense). May include a seed if two seeds are adjacent — harmless.
+// regardless of LOS (e.g. a tremor sense that hears through walls). May include a seed if two seeds
+// are adjacent — harmless.
 export function neighbors(connections, from) {
   const adj = buildAdjacency(connections);
   const seeds = (from instanceof Set || Array.isArray(from)) ? [...from] : [from];
@@ -50,10 +51,14 @@ export function distance(connections, from, to) {
 //   - to.losIn   !== false     (the target can be seen INTO)
 //   - every INTERMEDIATE area on the path has losThrough !== false (sight transits it)
 // Any single valid path counts. All three flags default to true when absent.
+// A blacked-out room is sealed on all three counts at once, WITHOUT overwriting the GM's own
+// switches, so lifting the blackout restores exactly what was set before it.
+const sealed = (area, field) => !!area?.blackout || area?.[field] === false;
+
 export function hasLOS(connections, from, to, areas = {}) {
   if (from === to) return true;
-  if (areas[from]?.losOut === false) return false;   // sealed source
-  if (areas[to]?.losIn === false) return false;      // sealed target
+  if (sealed(areas[from], "losOut")) return false;   // sealed source
+  if (sealed(areas[to], "losIn")) return false;      // sealed target
   const adj = buildAdjacency(connections);
   // BFS; the target's In was already checked, so the target is never treated as a wall.
   const visited = new Set([from]);
@@ -63,7 +68,7 @@ export function hasLOS(connections, from, to, areas = {}) {
     for (const n of adj[cur] || []) {
       if (n === to) return true;
       if (visited.has(n)) continue;
-      if (areas[n]?.losThrough === false) continue;  // wall — sight stops here
+      if (sealed(areas[n], "losThrough")) continue;  // wall — sight stops here
       visited.add(n);
       queue.push(n);
     }

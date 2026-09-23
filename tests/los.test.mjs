@@ -190,3 +190,50 @@ test("distance gives room-graph hops (bent corridors cost by zones traversed, no
   // a shortcut door makes the long way cheap — graph distance picks the fewest zones
   assert.equal(distance([...LINE, ["A", "D"]], "A", "D"), 1);
 });
+
+// ---------- blackout seals sight on all three counts ----------
+
+const OPEN = { A: {}, B: {}, C: {}, D: {} };
+const dark = (label) => ({ ...OPEN, [label]: { blackout: true } });
+
+test("a blacked-out room cannot be seen INTO", () => {
+  assert.equal(hasLOS(LINE, "A", "B", OPEN), true);
+  assert.equal(hasLOS(LINE, "A", "B", dark("B")), false);
+});
+
+test("a blacked-out room cannot see OUT", () => {
+  assert.equal(hasLOS(LINE, "B", "A", dark("B")), false);
+});
+
+test("sight cannot pass THROUGH a blacked-out room", () => {
+  assert.equal(hasLOS(LINE, "A", "C", OPEN), true);
+  assert.equal(hasLOS(LINE, "A", "C", dark("B")), false, "B is in the way and it is not there");
+});
+
+test("a blacked-out room still sees itself, so a Keeper token in one is not blind", () => {
+  assert.equal(hasLOS(LINE, "B", "B", dark("B")), true);
+});
+
+test("blackout seals a room whose own switches are all open", () => {
+  // it is not implemented by writing losIn/losOut/losThrough, so it must hold over TRUE ones
+  const explicit = { ...OPEN, B: { blackout: true, losIn: true, losOut: true, losThrough: true } };
+  assert.equal(hasLOS(LINE, "A", "B", explicit), false);
+  assert.equal(hasLOS(LINE, "B", "A", explicit), false);
+  assert.equal(hasLOS(LINE, "A", "C", explicit), false);
+});
+
+test("a blacked-out room drops out of what anyone can reach", () => {
+  const seen = reachableAreas(LINE, ["A"], dark("B"));
+  assert.equal(seen.has("A"), true);
+  assert.equal(seen.has("B"), false);
+  assert.equal(seen.has("C"), false, "and takes everything behind it with it");
+});
+
+// ---------- a doorway is simply an edge the SIGHT graph does not have ----------
+
+test("sight stops at a doorway while distance does not", () => {
+  const sight = [["A", "B"], ["C", "D"]];            // B-C sealed by a doorway
+  assert.equal(hasLOS(sight, "B", "C", OPEN), false, "sight cannot cross it");
+  assert.equal(distance(LINE, "B", "C"), 1, "but it is still one hop away");
+  assert.equal(distance(LINE, "A", "D"), 3, "and the route is still three");
+});

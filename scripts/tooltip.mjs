@@ -1,10 +1,11 @@
-// A.T.L.A.S. — the hover readout. Hover any room with a token SELECTED and its LABEL wears the
+// Atlas — the hover readout. Hover any room with a token SELECTED and its LABEL wears the
 // range + LOS box (host ask 2026-09-02: the cursor-following tag was noise — the label already
 // names the room, so nothing shows without a selection, and the info sits where the eye already
 // is). Pure helpers (bucket) are unit-tested; the rest is canvas/DOM glue. No Foundry calls run
 // at import (all inside functions).
 import { CONFIG } from "./config.mjs";
 import { areaAtPoint, tokenArea, distance, hasLOS } from "./los.mjs";
+import { sightConnections } from "./data.mjs";
 import { centroid } from "./marker.mjs";
 import { hoverArea } from "./labels.mjs";
 
@@ -13,6 +14,16 @@ let _throttle = 0;
 let _lastHover = null;
 let _el = null;
 let _hl = null;   // PIXI overlay that lifts + brightens the hovered room's outline
+
+/**
+ * Should this room refuse to answer the hover at all? PURE.
+ *
+ * The Keeper sees every room, hidden or not, because hiding one is their own doing. Everyone else
+ * gets nothing: no highlight, no range, no sight verdict, no acknowledgement that a room is there.
+ */
+export function hoverHidden(area, isGM) {
+  return !isGM && !!area?.blackout;
+}
 
 // distance → colour bucket (pure, tested)
 export function bucket(dist) {
@@ -115,7 +126,17 @@ function onPointerMove(event) {
 
   const world = event.getLocalPosition ? event.getLocalPosition(canvas.stage) : event.data.getLocalPosition(canvas.stage);
   const hovered = areaAtPoint(world.x, world.y, data.areas);
-  if (!hovered) { if (_lastHover) resetHover(); return; }
+  // ⚠⚠ A HIDDEN ROOM IS HIDDEN HERE TOO. This file runs for EVERY client, and it draws its own
+  //    highlight from the room's raw shape onto canvas.controls, which is nothing to do with the
+  //    outline Drawing that blackout.mjs fades out. Without this test a player sweeping the cursor
+  //    over apparently blank floor got the secret room's exact polygon in bright amber, with no
+  //    token selected and nothing to click. Blackout's whole purpose leaked through the hover.
+  // ⚠ Folded into the existing bail so the highlight and the readout die together: everything
+  //   below is downstream of a hovered room, and a separate early return would strand the last one.
+  if (!hovered || hoverHidden(data.areas[hovered], game.user?.isGM)) {
+    if (_lastHover) resetHover();
+    return;
+  }
   if (hovered === _lastHover) {              // same room → keep the readout, re-pin it to the label
     placeTooltip(hovered, data);             // (a right-drag pan moves the label under a live readout)
     return;
@@ -130,7 +151,7 @@ function onPointerMove(event) {
   if (!myArea || myArea === hovered) { removeTooltip(); return; }   // your own room → highlight only
 
   const dist = distance(data.connections || [], myArea, hovered);
-  const los = hasLOS(data.connections || [], myArea, hovered, data.areas);
+  const los = hasLOS(sightConnections(data), myArea, hovered, data.areas);   // ⚠ SIGHT graph
   showTooltip(hovered, readout(dist, los), bucket(dist), data);
 }
 

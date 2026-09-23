@@ -1,4 +1,4 @@
-// A.T.L.A.S. — the RUNTIME (the hard part). Per-client, live, automatic fog of war.
+// Atlas — the RUNTIME (the hard part). Per-client, live, automatic fog of war.
 //
 // This is Foundry glue around the already-tested pure core (los.mjs). It:
 //   1) overrides Token.prototype.isVisible so EACH client filters tokens by its own LOS — NOT the
@@ -13,6 +13,8 @@
 // All Foundry calls live inside functions (nothing runs at import) so the file parses in Node too.
 import { CONFIG } from "./config.mjs";
 import { tokenArea, reachableAreas, neighbors } from "./los.mjs";
+import { sightConnections } from "./data.mjs";
+import { retargetPanel, openRoomPanel } from "./room-panel.mjs";
 
 let _installed = false;
 let _origIsVisible = null;
@@ -42,15 +44,21 @@ function localVisibleAreas() {
     const area = tokenArea(tok.center.x, tok.center.y, data.areas);
     if (area) own.add(area);
   }
-  const visible = reachableAreas(data.connections || [], [...own], data.areas);
+  // ⚠ SIGHT graph, not the travel graph: a doorway seals sight across one connection without
+  //   disconnecting the rooms. A blacked-out room is sealed inside hasLOS itself.
+  const visible = reachableAreas(sightConnections(data), [...own], data.areas);
   // Host "sense" effects (e.g. tremor sense) reveal EXTRA areas beyond LOS. Tracked as SENSED, NOT seen:
   // a sensed token renders (so the player knows something's there) but as an anonymous silhouette, and
   // it NEVER gains line of sight (hasLOS is computed separately) — so it can't be targeted/attacked.
+  // ⚠⚠ A BLACKED-OUT ROOM IS NEVER SENSED. A host sense walks its own graph on purpose (a tremor
+  //   sense reaches through the ground, not along the doors), so it does not consult the sight
+  //   rules that seal a hidden room, and without this line a creature standing in one renders as a
+  //   silhouette: the player is told something is there, in a room that is not supposed to exist.
   const sensed = new Set();
   try {
     const extra = CONFIG.extraAreas?.(own, data, { neighbors });
-    if (extra) for (const a of extra) if (!visible.has(a)) sensed.add(a);
-  } catch (e) { console.warn("ATLAS | extraAreas hook error — ignored", e); }
+    if (extra) for (const a of extra) if (!visible.has(a) && !data.areas?.[a]?.blackout) sensed.add(a);
+  } catch (e) { console.warn("Atlas | extraAreas hook error — ignored", e); }
   _cache = { time: now, visible, sensed, own, data };
   return _cache;
 }
@@ -63,7 +71,7 @@ const PATCHED = Symbol.for("atlas.isVisible");
 
 function installVisibilityOverride() {
   const proto = (globalThis.Token ?? foundry.canvas?.placeables?.Token)?.prototype;
-  if (!proto) { console.warn("ATLAS | Token prototype not found — visibility override skipped"); return; }
+  if (!proto) { console.warn("Atlas | Token prototype not found — visibility override skipped"); return; }
   // Ask the CLASS ITSELF first. Token defines its own isVisible, the real one that
   // tests the sight polygons; PlaceableObject defines one too, and that one returns
   // true for any token that is not hidden. Reaching up the prototype chain FIRST
@@ -74,7 +82,7 @@ function installVisibilityOverride() {
   if (own?.get?.[PATCHED]) return;                    // already installed
   _origIsVisible = own
     || Object.getOwnPropertyDescriptor(Object.getPrototypeOf(proto), "isVisible");
-  if (!_origIsVisible?.get) { console.warn("ATLAS | isVisible getter not found — override skipped"); return; }
+  if (!_origIsVisible?.get) { console.warn("Atlas | isVisible getter not found — override skipped"); return; }
 
   Object.defineProperty(proto, "isVisible", {
     configurable: true,
@@ -89,9 +97,13 @@ function installVisibilityOverride() {
         if (!vis.visible) return base;                // SELF-GATE: scene has no areas → no-op
         const area = tokenArea(this.center.x, this.center.y, vis.data.areas);
         if (!area) return true;                       // (no areas at all — defensive; self-gate covers it)
+        // ⚠⚠ A HIDDEN ROOM HIDES WHAT IS IN IT, BY EVERY PATH. Stated here rather than left to the
+        //   sight rules alone, because "is this token drawn" is decided here and a future reveal
+        //   route (another sense, a host override, a new cache field) would otherwise reopen it.
+        if (vis.data.areas?.[area]?.blackout) return false;
         return vis.visible.has(area) || (vis.sensed?.has(area) ?? false);  // seen OR sensed → renders
       } catch (e) {
-        console.warn("ATLAS | isVisible override error — falling back to default", e);
+        console.warn("Atlas | isVisible override error — falling back to default", e);
         return base;
       }
     }
@@ -157,14 +169,57 @@ export function installRuntime() {
   // inherits whatever menu the host hangs on that type. An INSTANCE method
   // wins over any prototype patch regardless of load order; pinning core's
   // BASE implementation keeps vanilla control/HUD behavior for the GM.
+  //
+  // A LEFT click also points the room panel at this room, so one window follows the GM around the
+  // map instead of a dialog opening per room. It retargets only an OPEN panel: clicking a label
+  // must never conjure a window nobody asked for.
+  // ⚠ MUST be assigned in drawToken. PlaceableObject#draw fires this hook on the line before
+  //   activateListeners() captures these callbacks BY REFERENCE, so a later assignment is ignored.
+  // ⚠ Pinning PlaceableObject's base, not Token's, is the same choice as the right click above, and
+  //   it does drop one thing: Token#_onClickLeft's branch for the TARGET tool. On a room label that
+  //   is the behaviour we want (a room is furniture, not a creature), and it is also what keeps a
+  //   host system's own left-click patch off the labels.
+  // ⚠ The label is read at CLICK time, not captured here, so a relabelled room can never send the
+  //   panel to a room that no longer exists.
   Hooks.on("drawToken", (token) => {
     if (!token.document?.flags?.[CONFIG.flagScope]?.areaMarker) return;
-    const base = foundry.canvas?.placeables?.PlaceableObject?.prototype?._onClickRight;
-    token._onClickRight = base ?? function (event) { event.stopPropagation?.(); };
+    const P = foundry.canvas?.placeables?.PlaceableObject?.prototype;
+    const right = P?._onClickRight;
+    token._onClickRight = right ?? function (event) { event.stopPropagation?.(); };
+    const left = P?._onClickLeft;
+    const labelOf = (t) => t.document?.flags?.[CONFIG.flagScope]?.areaMarker?.label;
+    token._onClickLeft = function (event) {
+      left?.call(this, event);                          // vanilla control/select first
+      const label = labelOf(this);
+      if (label) retargetPanel(label);
+    };
+    // A DOUBLE click OPENS the panel on this room. It deliberately does NOT call the base, which
+    // would open the marker actor's sheet: that sheet was the old per-room card, and it is retired
+    // from the canvas (USER 2026-09-23). It survives only in the sidebar, where it is the notice
+    // telling you to leave the hidden actor alone.
+    // ⚠ The first mousedown of a double click has already fired the single-click path, so the panel
+    //   is usually pointed at this room before it opens. Opening is idempotent, so that is harmless.
+    token._onClickLeft2 = function (event) {
+      event?.stopPropagation?.();
+      const label = labelOf(this);
+      if (label) openRoomPanel(label);
+    };
   });
 
   // boundary sensor — fires every frame during movement; act only when MY token changes room
   Hooks.on("refreshToken", (token) => {
+    // ⚠⚠ A PREVIEW NEVER MOVES ANYONE. Foundry builds a drag ghost with
+    // document.clone({}, { keepId: true }), so the ghost carries the REAL token's id and
+    // fires this hook at the cursor, every frame, while the real token sits still at home.
+    // Unguarded, _lastArea gets stamped with the room under the CURSOR: the token's later
+    // genuine arrival in that room then reads cur === last and requests NO refresh, and the
+    // fog holds whatever was last drawn until some unrelated event redraws it. The ghost and
+    // the original re-stamp each other, so it presents as an intermittent "it fixes itself if
+    // you jiggle something" rather than a clean failure. isPreview is core's own tell and
+    // covers the drag, config-sheet and creation ghosts alike. Nothing is lost by skipping
+    // one: localVisibleAreas reads canvas.tokens.placeables, and a ghost lives in
+    // layer.preview, so a ghost was never counted in the answer anyway.
+    if (token.isPreview) return;
     const doc = token.document;
     if (!CONFIG.isOwnView(doc)) return;
     if (doc.flags?.[CONFIG.flagScope]?.areaMarker) return;
@@ -181,7 +236,7 @@ export function installRuntime() {
 
   // sensed-token appearance — runs for EVERY token (not just mine): silhouette the ones a sense reveals.
   Hooks.on("refreshToken", (token) => {
-    try { refreshSenseAppearance(token); } catch (e) { console.warn("ATLAS | sense-appearance error — ignored", e); }
+    try { refreshSenseAppearance(token); } catch (e) { console.warn("Atlas | sense-appearance error — ignored", e); }
   });
 
   // a LOS toggle / reset must hide & reveal live, not only on movement
@@ -197,5 +252,5 @@ export function installRuntime() {
   // fresh scene → forget per-token room memory
   Hooks.on("canvasReady", () => { _lastArea.clear(); invalidateCache(); });
 
-  console.log("ATLAS | runtime installed (per-client visibility + boundary sensor)");
+  console.log("Atlas | runtime installed (per-client visibility + boundary sensor)");
 }

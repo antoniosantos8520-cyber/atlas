@@ -1,6 +1,11 @@
-// A.T.L.A.S. — the interactive click-to-trace tool (GM).
+// Atlas — the interactive click-to-trace tool (GM).
 // Trace a room by clicking its corners; Enter/right-click finishes, Backspace undoes, Esc cancels.
-// All canvas/PIXI glue (no Node tests); it just collects a polygon and hands it to placeRoom().
+// All canvas/PIXI glue (no Node tests); it just collects a polygon and hands it somewhere.
+//
+// WHERE it hands it is the caller's business. With no sink both tools do what they always did:
+// ask for a name and create a new room. Given `onShape`, they hand over the bare polygon and say
+// nothing, which is how the panel's Redraw reshapes a room that already exists and keeps its name,
+// its sight settings, its effects and its connections exactly as they were.
 // No top-level Foundry calls (initTrace registers the cleanup hook) so the file imports cleanly in Node.
 import { placeRoom, rectPoints } from "./marker.mjs";
 
@@ -67,15 +72,17 @@ function teardown() {
   _trace = null;
 }
 
-function cancel() { teardown(); ui.notifications?.info("A.T.L.A.S.: trace cancelled."); }
+function cancel() { teardown(); ui.notifications?.info("Atlas: trace cancelled."); }
 
 async function finish() {
   const pts = _trace ? [...(_trace.points)] : [];
+  const sink = _trace?.sink ?? null;                  // read BEFORE teardown drops the record
   teardown();
-  if (pts.length < 6) { ui.notifications?.warn("A.T.L.A.S.: a room needs at least 3 corners."); return; }
+  if (pts.length < 6) { ui.notifications?.warn("Atlas: a room needs at least 3 corners."); return; }
+  if (sink) { await sink(pts); return; }              // the caller owns the shape and the message
   const name = await promptRoomName();                // "" if left blank or dismissed (room still created)
   const label = await placeRoom(canvas.scene, pts, undefined, name);
-  if (label) ui.notifications?.info(`A.T.L.A.S.: created room ${label}${name ? ` — ${name}` : ""}.`);
+  if (label) ui.notifications?.info(`Atlas: created room ${label}${name ? ` — ${name}` : ""}.`);
 }
 
 // ask for a player-facing room name; "" = unnamed (letter only)
@@ -92,17 +99,20 @@ async function promptRoomName() {
   } catch (_) { return ""; }
 }
 
-export function startTrace() {
-  if (!canvas?.ready) { ui.notifications?.warn("A.T.L.A.S.: no active canvas."); return; }
+/** Is a modal drawing tool mid-gesture? A passive canvas listener keeps out of its way. */
+export function tracing() { return !!(_trace || _box); }
+
+export function startTrace({ onShape = null } = {}) {
+  if (!canvas?.ready) { ui.notifications?.warn("Atlas: no active canvas."); return; }
   if (!game.user?.isGM) return;
   teardownAll();
   const g = new PIXI.Graphics();
   (canvas.controls ?? canvas.stage).addChild(g);
-  _trace = { points: [], graphics: g, lastWorld: null };
+  _trace = { points: [], graphics: g, lastWorld: null, sink: onShape };
   canvas.stage.addEventListener?.("pointerdown", onDown, { capture: true });
   canvas.stage.on?.("pointermove", onMove);
   window.addEventListener("keydown", onKey);
-  ui.notifications?.info("A.T.L.A.S.: click the room's corners · Enter / right-click = finish · Backspace = undo · Esc = cancel.");
+  ui.notifications?.info("Atlas: click the room's corners · Enter / right-click = finish · Backspace = undo · Esc = cancel.");
 }
 
 // ---------- BOX mode: click-drag a rectangle room (fast) ----------
@@ -131,14 +141,16 @@ async function onBoxUp(e) {
   if (!_box?.dragging) return;
   e.stopPropagation();
   const s = _box.startW, t = _box.lastW;
+  const sink = _box.sink ?? null;                     // read BEFORE teardown drops the record
   teardownBox();
   if (!s || !t) return;
   const x1 = Math.min(s.x, t.x), y1 = Math.min(s.y, t.y);
   const w = Math.max(s.x, t.x) - x1, h = Math.max(s.y, t.y) - y1;
-  if (w < 5 || h < 5) { ui.notifications?.warn("A.T.L.A.S.: box too small — drag a larger rectangle."); return; }
+  if (w < 5 || h < 5) { ui.notifications?.warn("Atlas: box too small — drag a larger rectangle."); return; }
+  if (sink) { await sink(rectPoints(x1, y1, w, h)); return; }
   const name = await promptRoomName();
   const label = await placeRoom(canvas.scene, rectPoints(x1, y1, w, h), undefined, name);
-  if (label) ui.notifications?.info(`A.T.L.A.S.: created room ${label}${name ? ` — ${name}` : ""}.`);
+  if (label) ui.notifications?.info(`Atlas: created room ${label}${name ? ` — ${name}` : ""}.`);
 }
 function onBoxKey(ev) { if (_box && ev.key === "Escape") { ev.preventDefault(); cancelBox(); } }
 function teardownBox() {
@@ -150,20 +162,20 @@ function teardownBox() {
   try { _box.graphics?.destroy?.(); } catch (_) {}
   _box = null;
 }
-function cancelBox() { teardownBox(); ui.notifications?.info("A.T.L.A.S.: box cancelled."); }
+function cancelBox() { teardownBox(); ui.notifications?.info("Atlas: box cancelled."); }
 
-export function startBox() {
-  if (!canvas?.ready) { ui.notifications?.warn("A.T.L.A.S.: no active canvas."); return; }
+export function startBox({ onShape = null } = {}) {
+  if (!canvas?.ready) { ui.notifications?.warn("Atlas: no active canvas."); return; }
   if (!game.user?.isGM) return;
   teardownAll();
   const g = new PIXI.Graphics();
   (canvas.controls ?? canvas.stage).addChild(g);
-  _box = { graphics: g, startW: null, lastW: null, dragging: false };
+  _box = { graphics: g, startW: null, lastW: null, dragging: false, sink: onShape };
   canvas.stage.addEventListener?.("pointerdown", onBoxDown, { capture: true });
   canvas.stage.addEventListener?.("pointerup", onBoxUp, { capture: true });
   canvas.stage.on?.("pointermove", onBoxMove);
   window.addEventListener("keydown", onBoxKey);
-  ui.notifications?.info("A.T.L.A.S.: click-drag a rectangle room · Esc = cancel.");
+  ui.notifications?.info("Atlas: click-drag a rectangle room · Esc = cancel.");
 }
 
 // clean up an in-progress trace/box on scene change (registered from atlas.mjs setup)

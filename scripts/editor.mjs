@@ -1,4 +1,4 @@
-// A.T.L.A.S. — the editor panel: trace/clear buttons, the connection matrix (wire doors), and the
+// Atlas — the editor panel: trace/clear buttons, the connection matrix (wire doors), and the
 // In/Out/Through table. Mountable into a host element (ATLAS.renderEditor) OR opened as a standalone
 // window. `editorHTML` is a pure string builder (unit-tested); the rest is thin DOM/Foundry glue.
 import { CONFIG } from "./config.mjs";
@@ -18,7 +18,7 @@ export function editorHTML(data, locked = false) {
       <button type="button" class="atlas-btn" data-atlas-action="trace" title="Click each corner of the room (any shape)"><i class="fa-solid fa-draw-polygon"></i> Trace</button>
       <button type="button" class="atlas-btn" data-atlas-action="box" title="Click-drag a rectangle room (fast)"><i class="fa-solid fa-vector-square"></i> Box</button>
       <button type="button" class="atlas-btn${locked ? " on" : ""}" data-atlas-action="lock" title="Lock the room markers so you don't bump them while moving combatants"><i class="fa-solid fa-lock${locked ? "" : "-open"}"></i> ${locked ? "Locked" : "Unlocked"}</button>
-      <button type="button" class="atlas-btn" data-atlas-action="redraw" title="Move rooms to match their letter markers + refresh outlines & lines"><i class="fa-solid fa-arrows-rotate"></i> Redraw</button>
+      <button type="button" class="atlas-btn" data-atlas-action="redraw" title="Repaint every room outline and travel line from the saved shapes. Use this if a drawing has been deleted or has drifted; to MOVE a room, use move mode on the room panel."><i class="fa-solid fa-arrows-rotate"></i> Redraw</button>
       <button type="button" class="atlas-btn danger" data-atlas-action="clear"><i class="fa-solid fa-trash-can"></i> Clear</button>
     </div>`;
 
@@ -123,11 +123,11 @@ async function onEditorClick(ev) {
 
   if (act === "trace") { startTrace(); return; }
   if (act === "box") { startBox(); return; }
-  if (act === "redraw") { await redrawAreas(scene); return; }  // re-anchor rooms to letters + refresh
+  if (act === "redraw") { await redrawAreas(scene); return; }  // repaint only: it no longer moves rooms
   if (act === "lock") { await toggleLock(scene); return; }     // → updateScene → re-renders
   if (act === "clear") {
     const ok = await foundry.applications.api.DialogV2.confirm({
-      window: { title: "Clear A.T.L.A.S. areas?" },
+      window: { title: "Clear Atlas areas?" },
       content: "<p>Remove all rooms, outlines, and LOS data from <b>this scene</b>?</p>", rejectClose: false
     });
     if (ok) await clearAllAreas(scene);     // → updateScene → re-renders below
@@ -160,7 +160,7 @@ function EditorApp() {
     static DEFAULT_OPTIONS = {
       id: "atlas-editor-app",
       classes: ["atlas-editor-window"],
-      window: { title: "A.T.L.A.S. — Areas", icon: "fa-solid fa-draw-polygon", resizable: true },
+      window: { title: "Atlas — Areas", icon: "fa-solid fa-draw-polygon", resizable: true },
       position: { width: 380, height: "auto" }
     };
     async _renderHTML() { return ""; }
@@ -169,7 +169,7 @@ function EditorApp() {
 }
 
 export function openEditorWindow() {
-  if (!game.user?.isGM) { ui.notifications?.warn("A.T.L.A.S. is GM-only."); return; }
+  if (!game.user?.isGM) { ui.notifications?.warn("Atlas is GM-only."); return; }
   _app = _app ?? new (EditorApp())();
   _app.render(true);
 }
@@ -179,7 +179,9 @@ export function registerControls() {
     if (!game.user?.isGM) return;
     const grp = controls.tokens ?? controls.token;
     if (!grp) return;
-    const tool = { name: "atlasAreas", title: "A.T.L.A.S. — Areas", icon: "fa-solid fa-draw-polygon", button: true, order: 90, onClick: () => openEditorWindow() };
+    // ⚠ onChange, not onClick: onClick has been deprecated since Foundry 13 and its shim is
+    //   removed in 15. The signature is (event, active); a button tool has no active state to read.
+    const tool = { name: "atlasAreas", title: "Atlas — Areas", icon: "fa-solid fa-draw-polygon", button: true, order: 90, onChange: () => openEditorWindow() };
     if (grp.tools && !Array.isArray(grp.tools)) grp.tools.atlasAreas = tool;
     else if (Array.isArray(grp.tools)) grp.tools.push(tool);
   });

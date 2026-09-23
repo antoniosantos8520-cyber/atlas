@@ -1,4 +1,4 @@
-// A.T.L.A.S. — shared runtime config. A host system can override via ATLAS.configure({...}).
+// Atlas — shared runtime config. A host system can override via ATLAS.configure({...}).
 // Pure-importable (the default functions only touch Foundry globals when CALLED, not at import).
 
 export const CONFIG = {
@@ -15,6 +15,13 @@ export const CONFIG = {
   // area labels (or null/undefined for none). Default null = no-op. The host supplies only the *rule*
   // (when/which); `neighbors` is handed in so the host never needs Atlas's graph internals.
   extraAreas: null,
+  // host hook: "this token is not a creature walking through rooms, leave it alone". Called as
+  // skipMovementGate(doc, movement) -> true to exempt, and only consulted when the movement
+  // restriction setting is on. ATLAS can recognise its own room labels and nothing else; a host's
+  // party markers, ward lamps and thrown props are invisible to it, and a token TYPE test cannot
+  // tell them apart either, because a room label wears a host actor type too. ONE top-level key,
+  // so two hosts calling configure() cannot stomp each other the way a sub-object would.
+  skipMovementGate: () => false,
   // Area EFFECTS the GM can lay on a room (the marker card's Effects row / ATLAS.setAreaEffect):
   // id → { label, icon, tint, los? }. `tint` recolors the room's outline while the effect holds; `los` is a
   // set of LOS flags WRITTEN ONCE when the effect is applied (Web seals its room) — clearing an effect never

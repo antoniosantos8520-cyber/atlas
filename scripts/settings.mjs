@@ -1,4 +1,4 @@
-// A.T.L.A.S. — module settings + the pure readers that depend on them.
+// Atlas — module settings + the pure readers that depend on them.
 //
 // Two sliders govern how room labels LOOK (never where they are):
 //   labelOpacity:  the resting opacity of every label. Hover always goes to full.
@@ -17,6 +17,8 @@ export const LABEL_FS_DEFAULT = 20;
 export const LABEL_OPACITY_DEFAULT = 0.75;
 export const OVERLAY_COLOR_DEFAULT = "#3d7bd0";
 export const OVERLAY_OPACITY_DEFAULT = 0.1;
+export const BLACKOUT_FILL = "#0d0b14";
+export const BLACKOUT_EDGE = "#5b9bff";
 
 // A room's overlay is two parts: the wash across it and the outline around it. ONE
 // slider drives both, so turning it to 0 switches the overlay off completely instead
@@ -69,10 +71,65 @@ function hex(key, fallback) {
   return fallback;
 }
 
+// A table rule rather than a look: is a player held to the connection matrix when they move?
+// Strict false, so a setting that has never been touched, or is read before init, is OFF.
+export function movementRestricted() { return raw("restrictMovement") === true; }
+
+/**
+ * Turn the traffic rule on or off from a surface other than the settings menu.
+ *
+ * ⚠ GM ONLY, and a WORLD setting: this is one switch for the whole table, not a per-client
+ *   preference, so a player pressing it would fail at the socket rather than quietly do nothing.
+ */
+export async function setMovementRestricted(on) {
+  if (!game.user?.isGM) return false;
+  await game.settings.set(MODULE_ID, "restrictMovement", !!on);
+  return true;
+}
+
 export function labelFontSize() { return num("labelFontSize", LABEL_FS_DEFAULT); }
 export function labelOpacity() { return num("labelOpacity", LABEL_OPACITY_DEFAULT); }
 export function overlayColor() { return hex("overlayColor", OVERLAY_COLOR_DEFAULT); }
 export function overlayOpacity() { return num("overlayOpacity", OVERLAY_OPACITY_DEFAULT); }
+
+// A tiled diagonal hatch, generated once and reused, so a scene with ten hidden rooms carries one
+// small data URL rather than ten. Base64 image data is a valid value for a Drawing's texture field
+// (FilePathField accepts it alongside a file extension), which is the same trick the room labels
+// already use for their own generated textures.
+let _hatch = null;
+export function hatchTexture() {
+  if (_hatch) return _hatch;
+  const S = 16;
+  const c = document.createElement("canvas");
+  c.width = S; c.height = S;
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = BLACKOUT_FILL;
+  ctx.fillRect(0, 0, S, S);
+  ctx.strokeStyle = "rgba(255,255,255,0.13)";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  // three passes so the 45 degree stripes meet cleanly across the tile seam
+  for (let i = -S; i <= S * 2; i += S / 2) { ctx.moveTo(i, S); ctx.lineTo(i + S, 0); }
+  ctx.stroke();
+  _hatch = c.toDataURL();
+  return _hatch;
+}
+
+/**
+ * How a BLACKED-OUT room is drawn, and it is only ever drawn for the Keeper: a player's client
+ * zeroes the outline's alpha entirely (⚓ blackout.mjs). So this can be as loud as it likes; the
+ * point is that the Keeper can never mistake a hidden room for an ordinary one.
+ */
+export function blackoutStyle() {
+  return {
+    fillType: 2,                                  // PATTERN, so the hatch reads as "not really here"
+    texture: hatchTexture(),
+    fillColor: BLACKOUT_FILL,
+    fillAlpha: 0.94,
+    strokeColor: BLACKOUT_EDGE,
+    strokeAlpha: 0.9,
+  };
+}
 
 /**
  * The full Drawing style for a room outline. `tint` is an effect's colour, or null
@@ -84,7 +141,19 @@ export function overlayStyle(tint = null) {
 }
 
 // The handlers are passed in so this file stays free of label and drawing internals.
-export function registerSettings({ onRebuild, onRefresh, onOverlay } = {}) {
+export function registerSettings({ onRebuild, onRefresh, onOverlay, onTraffic } = {}) {
+  game.settings.register(MODULE_ID, "restrictMovement", {
+    name: "Restrict movement to connected rooms",
+    hint: "A player may only move a token between rooms joined in the connection matrix; a move to a room that is not connected is refused and the token stays where it is. Connections are doors, not adjacency, so two rooms can share a wall and still not be joined. The GM is never restricted. A token standing outside every traced room is free to move anywhere, and a map with no connections yet is left alone.",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: false,
+    // ⚠ The panel draws this switch too, so it has to hear about the settings menu, and about
+    //   the other GM. A surface that shows a world rule and does not watch it goes stale silently.
+    onChange: () => onTraffic?.()
+  });
+
   game.settings.register(MODULE_ID, "labelOpacity", {
     name: "Room label opacity",
     hint: "How strongly room labels sit on the map at rest. Hovering a label always brings it to full. At 0 labels are invisible until hovered, and stay draggable, so you can still move a room by grabbing where its label sits.",

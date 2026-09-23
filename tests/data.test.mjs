@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   emptyAreaData, defaultAreaRecord, nextLabel, setArea, removeArea,
   normalizePair, hasConnection, toggleConnection, setLOS, setShape, sweepOrphans,
-  addEffect, removeEffect, layEffect, stackTint, labelAt, compareLabels, sortLabels
+  addEffect, removeEffect, layEffect, stackTint, labelAt, compareLabels, sortLabels,
+  stepLegal, hasDoorway, toggleDoorway, sightConnections,
+  setBlackout, isBlackedOut, anyBlackout, blackoutRefuses, translateShape
 } from "../scripts/data.mjs";
 import { CONFIG } from "../scripts/config.mjs";
 
@@ -221,4 +223,200 @@ test("transforms are immutable — the input is never mutated", () => {
   layEffect(d, "B", "fire", CONFIG.areaEffects);
   removeEffect(d, "B");
   assert.equal(JSON.stringify(d), snapshot);   // original untouched
+});
+
+// ---------------------------------------------------------------------------
+// stepLegal: one hop, judged on the endpoints
+// ---------------------------------------------------------------------------
+
+// the line from the ruling that set this rule: A–B–C–D, each joined only to its neighbour
+const line = () => {
+  let d = emptyAreaData();
+  for (const l of ["A", "B", "C", "D"]) d = setArea(d, l, defaultAreaRecord(l));
+  d = toggleConnection(d, "A", "B");
+  d = toggleConnection(d, "B", "C");
+  d = toggleConnection(d, "C", "D");
+  return d;
+};
+
+test("stepLegal: a hop along the line goes, a jump over a room does not", () => {
+  const d = line();
+  assert.equal(stepLegal(d, "A", "B"), true);
+  assert.equal(stepLegal(d, "B", "C"), true);
+  assert.equal(stepLegal(d, "C", "D"), true);
+  assert.equal(stepLegal(d, "A", "C"), false);   // reachable through B, but that is two moves
+  assert.equal(stepLegal(d, "A", "D"), false);
+  assert.equal(stepLegal(d, "B", "D"), false);
+});
+
+test("stepLegal: a link runs both ways, and so does the refusal", () => {
+  const d = line();
+  assert.equal(stepLegal(d, "D", "C"), true);
+  assert.equal(stepLegal(d, "B", "A"), true);
+  assert.equal(stepLegal(d, "C", "A"), false);   // the same jump, read backwards
+});
+
+test("stepLegal: staying where you are is always allowed", () => {
+  const d = line();
+  assert.equal(stepLegal(d, "A", "A"), true);
+  assert.equal(stepLegal(d, "Z", "Z"), true);    // even a room this map has never heard of
+});
+
+test("stepLegal: a token in no room is never refused", () => {
+  const d = line();
+  assert.equal(stepLegal(d, null, "C"), true);        // stepping in from an untraced gap
+  assert.equal(stepLegal(d, "A", null), true);        // stepping out into one
+  assert.equal(stepLegal(d, null, null), true);
+  assert.equal(stepLegal(d, undefined, "C"), true);   // an absent room reads the same as a null one
+});
+
+test("stepLegal: an island room is sealed off, but you may still stand in it", () => {
+  let d = line();
+  d = setArea(d, "E", defaultAreaRecord("E"));   // traced, joined to nothing
+  assert.equal(stepLegal(d, "D", "E"), false);
+  assert.equal(stepLegal(d, "E", "D"), false);
+  assert.equal(stepLegal(d, "E", "E"), true);
+});
+
+test("stepLegal: with no links at all every move between rooms is refused", () => {
+  // correct for the predicate, and never reached in play: the gate self-gates on a
+  // scene that has no area data before it asks this.
+  assert.equal(stepLegal(emptyAreaData(), "A", "B"), false);
+});
+
+// ---------------------------------------------------------------------------
+// DOORWAYS: a sight block on one connection
+// ---------------------------------------------------------------------------
+
+test("a doorway is stored on a connection and reads the same either way round", () => {
+  let d = line();
+  assert.equal(hasDoorway(d, "A", "B"), false);
+  d = toggleDoorway(d, "A", "B");
+  assert.equal(hasDoorway(d, "A", "B"), true);
+  assert.equal(hasDoorway(d, "B", "A"), true, "one doorway, not two");
+  d = toggleDoorway(d, "B", "A");
+  assert.equal(hasDoorway(d, "A", "B"), false, "and the reverse order removes the same one");
+});
+
+test("a doorway onto itself is a no-op", () => {
+  const d = toggleDoorway(line(), "A", "A");
+  assert.equal((d.doorways ?? []).length, 0);
+});
+
+test("a doorway leaves the TRAVEL graph completely alone", () => {
+  // the whole specification of a doorway: it blocks sight and nothing else
+  const d = toggleDoorway(line(), "A", "B");
+  assert.deepEqual(d.connections, line().connections, "connections untouched");
+  assert.equal(stepLegal(d, "A", "B"), true, "and the move is still legal");
+});
+
+test("the sight graph is the connections minus the doorways", () => {
+  const d = toggleDoorway(line(), "B", "C");
+  assert.deepEqual(sightConnections(d), [["A", "B"], ["C", "D"]]);
+  assert.deepEqual(sightConnections(line()), line().connections, "no doorways, no filtering");
+  assert.deepEqual(sightConnections({}), [], "and nothing at all is not a crash");
+});
+
+test("a doorway written in the other order still filters its connection", () => {
+  const d = { ...line(), doorways: [["C", "B"]] };
+  assert.deepEqual(sightConnections(d), [["A", "B"], ["C", "D"]]);
+});
+
+test("deleting a room takes its doorways with it", () => {
+  // otherwise a block sits forever on a connection that no longer exists, invisible
+  let d = toggleDoorway(toggleDoorway(line(), "A", "B"), "C", "D");
+  d = removeArea(d, "A");
+  assert.equal(hasDoorway(d, "A", "B"), false);
+  assert.equal(hasDoorway(d, "C", "D"), true, "and leaves the others alone");
+});
+
+// ---------------------------------------------------------------------------
+// BLACKOUT
+// ---------------------------------------------------------------------------
+
+test("blackout is a switch on the room, and does not touch its sight flags", () => {
+  // lifting a blackout must restore what the Keeper had set, not a default
+  let d = setArea(line(), "B", { ...line().areas.B, losIn: false, losThrough: true });
+  d = setBlackout(d, "B", true);
+  assert.equal(isBlackedOut(d, "B"), true);
+  assert.equal(d.areas.B.losIn, false, "the Keeper's own switches are untouched");
+  assert.equal(d.areas.B.losThrough, true);
+  d = setBlackout(d, "B", false);
+  assert.equal(isBlackedOut(d, "B"), false);
+  assert.equal(d.areas.B.losIn, false, "and they are still what they were");
+});
+
+test("blacking out a room that is not there changes nothing", () => {
+  const d = line();
+  assert.equal(setBlackout(d, "Q", true), d);
+});
+
+test("anyBlackout is the movement gate's cheap way to stay out of the way", () => {
+  assert.equal(anyBlackout(line()), false);
+  assert.equal(anyBlackout(setBlackout(line(), "C", true)), true);
+  assert.equal(anyBlackout({}), false);
+});
+
+test("movement INTO a blacked-out room is refused; out of it and inside it are not", () => {
+  const d = setBlackout(line(), "C", true);
+  assert.equal(blackoutRefuses(d, "B", "C"), true);
+  assert.equal(blackoutRefuses(d, "C", "B"), false, "you may leave a secret room");
+  assert.equal(blackoutRefuses(d, "C", "C"), false, "and move about inside it");
+  assert.equal(blackoutRefuses(d, "A", "B"), false);
+  assert.equal(blackoutRefuses(d, "B", null), false, "a gap is not a blacked-out room");
+});
+
+// ---------------------------------------------------------------------------
+// moving a whole room
+// ---------------------------------------------------------------------------
+
+test("translateShape slides every point and keeps the pairing", () => {
+  assert.deepEqual(translateShape([0, 0, 10, 0, 10, 10, 0, 10], 5, -3),
+    [5, -3, 15, -3, 15, 7, 5, 7]);
+});
+
+test("a zero move leaves a room exactly where it was", () => {
+  const pts = [1, 2, 3, 4];
+  assert.deepEqual(translateShape(pts, 0, 0), pts);
+  assert.notEqual(translateShape(pts, 0, 0), pts, "and hands back a new array, not the same one");
+});
+
+test("translateShape survives the shapes a caller might hand it", () => {
+  assert.deepEqual(translateShape([], 5, 5), []);
+  assert.deepEqual(translateShape(undefined, 5, 5), []);
+  assert.deepEqual(translateShape([0, 0], -2.5, 2.5), [-2.5, 2.5], "fractions are not rounded away");
+});
+
+test("a moved room is still the same room, just elsewhere", () => {
+  const d = line();
+  const before = d.areas.A.shape ?? [];
+  const after = translateShape(before, 40, 0);
+  assert.equal(after.length, before.length);
+  for (let i = 0; i < before.length; i += 2) assert.equal(after[i] - before[i], 40);
+});
+
+test("cutting a connection takes any doorway on it along", () => {
+  // ⚠ a sight block on a connection that no longer exists is invisible, and comes back to life
+  //   the moment the two rooms are rejoined
+  let d = { areas: { A: {}, B: {}, C: {} }, connections: [["A", "B"], ["B", "C"]], doorways: [["A", "B"]] };
+  assert.equal(hasDoorway(d, "A", "B"), true);
+  d = toggleConnection(d, "B", "A");                       // either order cuts the same edge
+  assert.equal(hasConnection(d, "A", "B"), false);
+  assert.equal(hasDoorway(d, "A", "B"), false, "the doorway went with it");
+  assert.deepEqual(d.connections, [["B", "C"]], "the other connection is untouched");
+});
+
+test("rejoining two rooms does NOT bring an old doorway back", () => {
+  let d = { areas: { A: {}, B: {} }, connections: [["A", "B"]], doorways: [["A", "B"]] };
+  d = toggleConnection(d, "A", "B");
+  d = toggleConnection(d, "A", "B");
+  assert.equal(hasConnection(d, "A", "B"), true);
+  assert.equal(hasDoorway(d, "A", "B"), false, "a new connection starts open");
+});
+
+test("MAKING a connection leaves other doorways alone", () => {
+  const d = toggleConnection(
+    { areas: { A: {}, B: {}, C: {} }, connections: [["B", "C"]], doorways: [["B", "C"]] }, "A", "B");
+  assert.equal(hasConnection(d, "A", "B"), true);
+  assert.equal(hasDoorway(d, "B", "C"), true);
 });
