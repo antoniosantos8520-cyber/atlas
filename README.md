@@ -1,10 +1,14 @@
 # Atlas
 
-*The Titan holding up the world, and a book of maps.*
+> Beneath the heavens Atlas held aloft, Athena spoke to mortals:
+>
+> *“I have lifted the veil from the land. Its roads and halls lie open before you; those who wait within them must still be found.”*
 
-A generic, **any-system** Foundry VTT module for **zone-based fog of war**. Instead of drawing walls, you sketch **rooms**, wire **connections** between them, set per-room **line-of-sight** rules, and the table runs its own fog: each player's screen shows only what *their* token can see, live, as anyone moves — with no manual hiding.
+**The map lies open. Its occupants do not.**
 
-Built for **tactical zone combat** — a real map and real token positioning, where the unit of position is the **room**, not the 5-foot square: you're in a zone or you're not, distance is measured in room-hops, sight runs zone to zone, and crossing a boundary is what movement *means*. Coarser grain than a grid, every bit as tactical. (It serves theatre-of-the-mind tables just as well, but it isn't limited to that.)
+Draw areas over your battlemap and connect them. Atlas uses each player's position and the sight rules you set to reveal the tokens they can see. Conceal the few rooms you wish to keep secret with Blackout. No walls to trace or lights to place.
+
+Built for **tactical zone combat** on a real map, with real token positioning, where the unit of position is the **room**, not the 5-foot square: you're in a zone or you're not, distance is measured in room-hops, sight runs zone to zone, and crossing a boundary is what movement *means*. Coarser grain than a grid, every bit as tactical. (It serves theatre-of-the-mind tables just as well, but it isn't limited to that.)
 
 > **New here?** The **[User's Manual](docs/Atlas-Users-Manual.pdf)** is a 19-page illustrated walkthrough of the whole tool, with screenshots. It is the fastest way in.
 >
@@ -32,9 +36,9 @@ Built for **tactical zone combat** — a real map and real token positioning, wh
 
 Set each room's **In / Out / Through**:
 
-- **In** — can it be seen *into* from outside?
-- **Out** — can tokens in it see or shoot *out*?
-- **Through** — can sight pass *through* it to somewhere beyond?
+- **In**: can it be seen *into* from outside?
+- **Out**: can tokens in it see or shoot *out*?
+- **Through**: can sight pass *through* it to somewhere beyond?
 
 For one token to see another, the viewer's room must allow Out, the target's room must allow In, and every room the route passes through must allow Through. Anyone in your own room is always visible.
 
@@ -48,15 +52,15 @@ For one token to see another, the viewer's room must allow Out, the target's roo
 - **Live, per-player hide/reveal.** A token is visible to you only if its room is reachable from your token's room by the rules above. The GM always sees everything.
 - **Traffic** (off by default) holds players to the map: a token may only move between rooms that are connected, one hop at a time. The GM is never restricted. A token standing outside every room moves freely, and a map with no connections yet is left alone entirely.
 - **Hover** a room with a token selected and its label wears a distance + LOS readout, while the room's outline lifts and brightens.
-- **Area effects** — **Web / Fire / Smoke / Ward** stack on a room and tint it. An effect's definition may carry LOS writes (Web seals In/Out as it lands; clearing an effect never writes LOS back, the GM re-toggles). Definitions live in `CONFIG.areaEffects`; hosts extend them. Any game *mechanics* stay host-side, keyed by effect id.
+- **Area effects**: **Web / Fire / Smoke / Ward** stack on a room and tint it. An effect's definition may carry LOS writes (Web seals In/Out as it lands; clearing an effect never writes LOS back, the GM re-toggles). Definitions live in `CONFIG.areaEffects`; hosts extend them. Any game *mechanics* stay host-side, keyed by effect id.
 
-Everything is **per scene** — each scene is its own map.
+Everything is **per scene**: each scene is its own map.
 
 ## How it works (the important part)
 
 Visibility is **not** Foundry's hide/eye flag (that's one shared switch). Atlas overrides `Token.prototype.isVisible` **per client**: the tokens stay un-hidden, and each player's screen independently decides what to draw based on *its own* line of sight. A lightweight movement sensor re-evaluates the instant any token crosses a room boundary, or you flip a LOS switch. On scenes without areas it's a no-op.
 
-> For zone scenes, turn off token vision and use global illumination — the area fog **is** the vision, and you don't want two systems fighting.
+> For zone scenes, turn off token vision and use global illumination. The area fog **is** the vision, and you do not want two systems fighting.
 
 ## Install
 
@@ -96,7 +100,7 @@ ATLAS.configure({
   filterToken: (doc) => !!doc.actor && !doc.flags?.atlas?.areaMarker,
   markerActorType: null,           // null = auto-pick a valid actor type; or force one (e.g. "npc")
 
-  // ⚠ IF YOUR SYSTEM HAS PROP TOKENS — lamps, markers, thrown weapons, a party pin — register this
+  // ⚠ IF YOUR SYSTEM HAS PROP TOKENS (lamps, markers, thrown weapons, a party pin), register this
   //    or they get movement-gated the moment a GM turns Traffic on. Return true to exempt a token.
   skipMovementGate: (doc, movement) => !!doc.flags?.["my-system"]?.prop,
 
@@ -114,7 +118,7 @@ ATLAS.renderEditor(htmlElement, scene);   // or mount the editor into your own c
 // queries
 ATLAS.hasAreas(scene);                    // does this scene have any rooms traced?
 ATLAS.hasLOS(scene, "A", "C");            // can room A see room C? (doorways removed)
-ATLAS.areaOf(x, y, scene);                // the room a point belongs to (inside OR nearest — for fog)
+ATLAS.areaOf(x, y, scene);                // the room a point belongs to (inside OR nearest, for fog)
 ATLAS.roomAt(x, y, scene);                // the room a point is strictly inside (null in a gap)
 ATLAS.roomDistance("A", "C", scene);      // hops over the connection graph (-1 unreachable)
 ATLAS.areaLabels(scene);                  // every traced room label
@@ -127,10 +131,10 @@ ATLAS.removeArea("A", scene);
 ATLAS.reset(scene);                       // wipe a scene's areas
 
 // area effects (they stack; definitions in CONFIG.areaEffects)
-ATLAS.setAreaEffect("C", "web");                  // lay by id — applies the def's LOS writes + retints
+ATLAS.setAreaEffect("C", "web");                  // lay by id: applies the def's LOS writes + retints
 ATLAS.setAreaEffect("C", { id:"fire", count:3 }); // effects carry state (re-laying an id refreshes it)
 ATLAS.areaEffects("C");                           // → [ { id, ...state }, ... ] in lay order
-ATLAS.clearAreaEffect("C", "web");                // remove one — or ALL with no id (LOS left as-is)
+ATLAS.clearAreaEffect("C", "web");                // remove one, or ALL with no id (LOS left as-is)
 
 // display (user settings drive these; these force an immediate apply)
 ATLAS.refresh();                          // recompute visibility now

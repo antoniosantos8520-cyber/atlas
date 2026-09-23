@@ -178,6 +178,9 @@ was built and committed but never released.
 
 ### Changed
 
+- **The README opens the way the manual's cover does**, and stops opening with a list of the things
+  Atlas is not. The em-dashes are gone from it too, replaced by the punctuation that was doing the
+  work anyway.
 - **The manual is the Atlas User's Manual**, `docs/Atlas-Users-Manual.pdf`, with a cover that says
   what the module is instead of listing what it is not. It also stops calling you the Keeper: that
   is one game system's word for the job, and this module does not care which system you run.
