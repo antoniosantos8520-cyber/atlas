@@ -11,7 +11,28 @@
 
 import { CONFIG } from "./config.mjs";
 
-const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+// Labels run like spreadsheet columns: A..Z, then AA..AZ, BA.., ZZ, AAA.. There is no
+// ceiling, so a big map never runs out of rooms.
+export function labelAt(n) {
+  let s = "";
+  n = Math.max(0, Math.floor(n || 0));
+  while (n >= 0) {
+    s = String.fromCharCode(65 + (n % 26)) + s;
+    n = Math.floor(n / 26) - 1;
+  }
+  return s;
+}
+
+// Sort labels the way they were HANDED OUT, not lexicographically: a plain .sort()
+// files AA between A and B, which scrambles every rail and matrix on a big map.
+export function compareLabels(a, b) {
+  const x = String(a), y = String(b);
+  return x.length - y.length || (x < y ? -1 : x > y ? 1 : 0);
+}
+
+export function sortLabels(labels) {
+  return [...labels].sort(compareLabels);
+}
 
 // ---------------------------------------------------------------------------
 // PURE TRANSFORMS (immutable)
@@ -31,10 +52,16 @@ export function setName(data, label, name) {
   return { ...data, areas: { ...data.areas, [label]: { ...data.areas[label], name: name ?? "" } } };
 }
 
-// next free letter, FILL-GAPS (delete B → the next one offered is B again). null when A–Z full.
+// next free label, FILL-GAPS (delete B → the next one offered is B again). With N rooms
+// placed, one of the first N+1 labels must be free, so this always terminates and never
+// runs out.
 export function nextLabel(data) {
   const placed = new Set(Object.keys(data?.areas ?? {}));
-  return LETTERS.find(l => !placed.has(l)) ?? null;
+  for (let i = 0; i <= placed.size; i++) {
+    const l = labelAt(i);
+    if (!placed.has(l)) return l;
+  }
+  return null;                                    // unreachable by the pigeonhole above
 }
 
 // add or replace an area record

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   emptyAreaData, defaultAreaRecord, nextLabel, setArea, removeArea,
   normalizePair, hasConnection, toggleConnection, setLOS, setShape, sweepOrphans,
-  addEffect, removeEffect, layEffect, stackTint
+  addEffect, removeEffect, layEffect, stackTint, labelAt, compareLabels, sortLabels
 } from "../scripts/data.mjs";
 import { CONFIG } from "../scripts/config.mjs";
 
@@ -35,6 +35,46 @@ test("nextLabel fills gaps (A, then B…, and refills a deleted middle letter)",
   assert.equal(nextLabel(d), "D");
   d = removeArea(d, "B");                 // delete the middle one
   assert.equal(nextLabel(d), "B");        // next drop refills B, not D
+});
+
+test("labelAt runs like spreadsheet columns past Z", () => {
+  assert.equal(labelAt(0), "A");
+  assert.equal(labelAt(25), "Z");
+  assert.equal(labelAt(26), "AA");
+  assert.equal(labelAt(27), "AB");
+  assert.equal(labelAt(51), "AZ");
+  assert.equal(labelAt(52), "BA");
+  assert.equal(labelAt(701), "ZZ");
+  assert.equal(labelAt(702), "AAA");
+});
+
+test("labelAt never repeats a label", () => {
+  const seen = new Set();
+  for (let i = 0; i < 800; i++) {
+    const l = labelAt(i);
+    assert.ok(!seen.has(l), `duplicate ${l} at ${i}`);
+    seen.add(l);
+  }
+});
+
+test("nextLabel carries on past Z instead of running out", () => {
+  let d = emptyAreaData();
+  for (let i = 0; i < 26; i++) d = setArea(d, labelAt(i), defaultAreaRecord(labelAt(i)));
+  assert.equal(nextLabel(d), "AA");
+  d = setArea(d, "AA", defaultAreaRecord("AA"));
+  assert.equal(nextLabel(d), "AB");
+  d = removeArea(d, "Q");                  // a gap anywhere still refills first
+  assert.equal(nextLabel(d), "Q");
+});
+
+test("compareLabels files AA after Z, not between A and B", () => {
+  assert.ok(compareLabels("Z", "AA") < 0);
+  assert.ok(compareLabels("AA", "B") > 0);
+  assert.ok(compareLabels("AA", "AB") < 0);
+  assert.equal(compareLabels("C", "C"), 0);
+  // the plain sort this replaces gets it wrong, which is the whole point
+  assert.deepEqual(sortLabels(["B", "AA", "A", "Z", "AB"]), ["A", "B", "Z", "AA", "AB"]);
+  assert.notDeepEqual(["B", "AA", "A", "Z", "AB"].sort(), ["A", "B", "Z", "AA", "AB"]);
 });
 
 test("setArea adds; removeArea deletes the area AND strips its connections", () => {

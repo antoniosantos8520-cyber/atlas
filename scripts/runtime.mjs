@@ -137,6 +137,18 @@ export function installRuntime() {
 
   installVisibilityOverride();
 
+  // Marker tokens own their clicks. Host systems patch Token.prototype for
+  // their own right-click UI (radial menus, smart mice), and the marker's
+  // hidden actor auto-picks a HOST actor type — so without this a room label
+  // inherits whatever menu the host hangs on that type. An INSTANCE method
+  // wins over any prototype patch regardless of load order; pinning core's
+  // BASE implementation keeps vanilla control/HUD behavior for the GM.
+  Hooks.on("drawToken", (token) => {
+    if (!token.document?.flags?.[CONFIG.flagScope]?.areaMarker) return;
+    const base = foundry.canvas?.placeables?.PlaceableObject?.prototype?._onClickRight;
+    token._onClickRight = base ?? function (event) { event.stopPropagation?.(); };
+  });
+
   // boundary sensor — fires every frame during movement; act only when MY token changes room
   Hooks.on("refreshToken", (token) => {
     const doc = token.document;

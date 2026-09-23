@@ -31,11 +31,11 @@ test("editorHTML reflects the lock state", () => {
   assert.match(locked, /fa-lock"/);   // closed padlock icon (not fa-lock-open)
 });
 
-test("editorHTML shows a room's name tag (escaped) next to its letter", () => {
+test("editorHTML shows a room's name (escaped) in an editable field by its letter", () => {
   let d = setArea(emptyAreaData(), "A", defaultAreaRecord("A"));
   d = setName(d, "A", "Throne <Room>");
   const h = editorHTML(d);
-  assert.match(h, /class="atlas-rn">Throne &lt;Room&gt;</);   // shown + HTML-escaped
+  assert.match(h, /class="atlas-rn-in" data-atlas-name="A" value="Throne &lt;Room&gt;"/);
 });
 
 test("editorHTML calls the connection a line of travel (not 'wire doors')", () => {
@@ -58,4 +58,38 @@ test("editorHTML renders the matrix + LOS table with the right state", () => {
   assert.match(h, /class="los on" data-atlas-action="los" data-label="A" data-field="losIn"/);
   // delete buttons exist
   assert.match(h, /data-atlas-action="del" data-label="A"/);
+});
+
+test("editorHTML: every room's name is an EDITABLE field, empty ones included", () => {
+  let d = fixture();
+  d = setName(d, "A", "Backyard");
+  const h = editorHTML(d);
+  // A carries its name as the input's value
+  assert.match(h, /data-atlas-name="A"[^>]*value="Backyard"/);
+  // B has no name yet but still gets a field, so it can be named after tracing
+  assert.match(h, /data-atlas-name="B"[^>]*value=""/);
+  assert.match(h, /placeholder="unnamed"/);
+});
+
+test("editorHTML: a room name cannot break out of the value attribute", () => {
+  let d = fixture();
+  d = setName(d, "A", 'Ba"ck<yard>&co');
+  const h = editorHTML(d);
+  assert.match(h, /value="Ba&quot;ck&lt;yard&gt;&amp;co"/);
+  assert.ok(!h.includes('value="Ba"ck'));
+});
+
+test("editorHTML: matrix cells name the pair they toggle", () => {
+  let d = fixture();
+  d = setName(d, "A", "Backyard");
+  const h = editorHTML(d);
+  assert.match(h, /data-a="A" data-b="B" data-tooltip="A\. Backyard ↔ B"/);
+});
+
+test("editorHTML: labels past Z sort after Z, not between A and B", () => {
+  let d = emptyAreaData();
+  for (const l of ["A", "B", "Z", "AA", "AB"]) d = setArea(d, l, defaultAreaRecord(l));
+  const h = editorHTML(d);
+  const rails = [...h.matchAll(/data-atlas-name="([A-Z]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(rails, ["A", "B", "Z", "AA", "AB"]);
 });

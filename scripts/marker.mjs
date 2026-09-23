@@ -5,10 +5,11 @@
 // Pure helpers (centroid, rectPoints) are unit-tested; the Foundry document work runs at call time only,
 // so this file still imports cleanly in Node.
 import { CONFIG } from "./config.mjs";
+import { labelFontSize, discScale, overlayStyle, LABEL_FS_DEFAULT } from "./settings.mjs";
 import { clipToPolygon } from "./los.mjs";
 import {
-  readAreaData, writeAreaData, setArea, setShape, setLOS, removeArea, defaultAreaRecord, nextLabel,
-  layEffect, removeEffect
+  readAreaData, writeAreaData, setArea, setShape, setLOS, setName, removeArea, defaultAreaRecord,
+  nextLabel, layEffect, removeEffect, stackTint
 } from "./data.mjs";
 import { retintFromData } from "./effects.mjs";
 
@@ -40,6 +41,19 @@ export function formatLabel(label, name) {
   return n ? `${label}. ${n}` : `${label}`;
 }
 
+// The letter is AUTHORING plumbing. It shows while the map is unlocked, so you can
+// find, name and grab rooms; locking the map is the "done building" signal, and the
+// letters drop away leaving only what you actually wrote. The matrix keeps them.
+export function labelTextFor(label, name, locked = false) {
+  return locked ? String(name ?? "").trim() : formatLabel(label, name);
+}
+
+// What a label's texture was last drawn for. rebuildLabels redraws any label whose
+// stamp differs, which doubles as the migration for labels made before the sliders.
+export function labelSig(fs, locked = false) {
+  return `${fs}|${locked ? 1 : 0}`;
+}
+
 // ---------- textures (browser canvas → data URL; no PNG assets) ----------
 const _texCache = new Map();
 
@@ -54,22 +68,25 @@ export function generateLetterTexture(letter, size = 64) {
   ctx.beginPath(); ctx.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2); ctx.fill();
   ctx.lineWidth = 3; ctx.strokeStyle = "#c4313d"; ctx.stroke();
   ctx.fillStyle = "#fff";
-  ctx.font = `bold ${Math.floor(size * 0.5)}px sans-serif`;
+  // a label past Z is two or three glyphs wide, so shrink the type to keep it inside the disc
+  const txt = String(letter);
+  ctx.font = `bold ${Math.floor(size * 0.5 * Math.min(1, 1.6 / Math.max(1, txt.length)))}px sans-serif`;
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText(String(letter), size / 2, size / 2 + 1);
+  ctx.fillText(txt, size / 2, size / 2 + 1);
   const url = c.toDataURL();
   _texCache.set(key, url);
   return url;
 }
 
 // a rounded, boxed label — used for NAMED rooms ("A. Front Room"). Returns { url, w, h } in px.
-export function generateLabelTexture(text, fs = 30) {
+export function generateLabelTexture(text, fs = LABEL_FS_DEFAULT) {
   const key = `label:${fs}:${text}`;
   if (_texCache.has(key)) return _texCache.get(key);
   const measure = document.createElement("canvas").getContext("2d");
   measure.font = `bold ${fs}px sans-serif`;
   const tw = Math.ceil(measure.measureText(String(text)).width);
-  const padX = 16, padY = 9;
+  // padding rides the font size, so the box stays the same shape at every slider setting
+  const padX = Math.round(fs * 0.55), padY = Math.round(fs * 0.3);
   const w = tw + padX * 2, h = fs + padY * 2;
   const c = document.createElement("canvas");
   c.width = w; c.height = h;
@@ -296,50 +313,67 @@ export function installMarkerHoverGuard() {
 // ---------- label token: NAMED → a boxed label texture; UNNAMED → a letter disc ----------
 // The texture IS the label (displayName off), so there's no redundant nameplate. The token is
 // centred on the room's centroid; its full cell is the grab area for moving + Redraw.
+// The position + texture a label wears at a given size and lock state, centred on
+// (cx, cy). Shared by dropLabel and labels.rebuildLabels so the two can never
+// disagree about where a label's centre is. Redraw anchors each room's polygon to
+// that centre, so a mismatch here would drag zones across the map.
+export function labelTokenData(label, name, { cx, cy, g, fs, locked = false }) {
+  if (name && String(name).trim()) {
+    const lab = generateLabelTexture(labelTextFor(label, name, locked), fs);
+    return {
+      x: Math.round(cx - lab.w / 2), y: Math.round(cy - lab.h / 2),
+      width: lab.w / g, height: lab.h / g,                 // render the box 1:1 (no stretch)
+      texture: { src: lab.url, scaleX: 1, scaleY: 1 }
+    };
+  }
+  const s = discScale(fs);                                 // a small letter disc, centred in the cell
+  return {
+    x: Math.round(cx - g / 2), y: Math.round(cy - g / 2),  // (the full cell stays the grab area)
+    width: 1, height: 1,
+    texture: { src: generateLetterTexture(label), scaleX: s, scaleY: s }
+  };
+}
+
 export async function dropLabel(scene, label, x, y, name = "") {
   scene = scene ?? canvas.scene;
   const scope = CONFIG.flagScope;
   const actor = await ensureMarkerActor();
   const g = canvas.grid.size;
   const locked = !!scene.getFlag(scope, "areasLocked");
-  const named = !!(name && name.trim());
-
-  let src, w, h, px, py, scale;
-  if (named) {
-    const lab = generateLabelTexture(formatLabel(label, name));
-    src = lab.url; w = lab.w / g; h = lab.h / g; scale = 1;        // render the box 1:1 (no stretch)
-    px = x - lab.w / 2; py = y - lab.h / 2;                        // centre the box on the centroid
-  } else {
-    src = generateLetterTexture(label); w = 1; h = 1; scale = 0.4; // a small letter disc, centred in the cell (full cell stays the grab area)
-    px = x - g / 2; py = y - g / 2;
-  }
+  const fs = labelFontSize();
 
   const [tok] = await scene.createEmbeddedDocuments("Token", [{
     actorId: actor.id, name: formatLabel(label, name), actorLink: false,
-    x: Math.round(px), y: Math.round(py), width: w, height: h,
-    texture: { src, scaleX: scale, scaleY: scale },
+    ...labelTokenData(label, name, { cx: x, cy: y, g, fs, locked }),
     displayName: CONST.TOKEN_DISPLAY_MODES.NONE,           // the texture IS the label — no nameplate
     disposition: CONST.TOKEN_DISPOSITIONS.NEUTRAL,
     sight: { enabled: false },
     lockRotation: true, locked, sort: -9999,
     // hideArt → the Image Hover module skips our label tokens (no giant portrait on hover)
-    flags: { [scope]: { areaMarker: { label, name } }, "image-hover": { hideArt: true } }
+    flags: {
+      [scope]: { areaMarker: { label, name, sig: labelSig(fs, locked) } },
+      "image-hover": { hideArt: true }
+    }
   }]);
   return tok;
 }
 
 // ---------- room outline drawing (cosmetic; so everyone sees the map) ----------
+// The outline is rebuilt from scratch on every redraw, so it re-derives its own tint
+// from the room's effect stack rather than taking stock colours: without that, one
+// Redraw would strip the tint off every webbed / burning / smoky room on the map.
 export async function drawRoomOutline(scene, label, points) {
   scene = scene ?? canvas.scene;
   const scope = CONFIG.flagScope;
   const old = scene.drawings.filter(d => d.flags?.[scope]?.areaRoom === label).map(d => d.id);
   if (old.length) await scene.deleteEmbeddedDocuments("Drawing", old);
   const locked = !!scene.getFlag(scope, "areasLocked");   // preserve lock across redraws
+  const tint = stackTint(readAreaData(scene).areas?.[label]?.effects, CONFIG.areaEffects);
   await scene.createEmbeddedDocuments("Drawing", [{
     x: 0, y: 0, locked,
     shape: { type: "p", points: [...points] },
-    fillType: 1, fillColor: "#3d7bd0", fillAlpha: 0.08,
-    strokeColor: "#3d7bd0", strokeAlpha: 0.7, strokeWidth: 3,
+    ...overlayStyle(tint),
+    strokeWidth: 3,
     sort: -9998,
     flags: { [scope]: { areaRoom: label } }
   }]);
@@ -420,13 +454,48 @@ export async function placeRoom(scene, points, label, name = "") {
   if (!points || points.length < 6) { ui.notifications?.warn("ATLAS: a room needs at least 3 points."); return null; }
   const data = readAreaData(scene);
   label = label ?? nextLabel(data);
-  if (!label) { ui.notifications?.warn("ATLAS: all 26 area letters are placed."); return null; }
+  if (!label) { ui.notifications?.warn("ATLAS: could not allocate an area label."); return null; }
   await writeAreaData(scene, setArea(data, label, defaultAreaRecord(label, points, name)));
   const c = centroid(points);
   await dropLabel(scene, label, c.x, c.y, name);
   await drawRoomOutline(scene, label, points);
   await drawConnections(scene);
   return label;
+}
+
+// ---------- rename ----------
+// A room's name lives in TWO places: the area record, which the matrix and the LOS
+// table read, and the marker token, which has the name baked into its texture. Both
+// move together here, or the panel and the map disagree about what a room is called.
+//
+// Clearing the name is a legal rename: the label falls back to a letter disc, which
+// players never see and which vanishes for everyone once the map is locked.
+export async function renameArea(scene, label, name) {
+  scene = scene ?? canvas.scene;
+  if (!game.user?.isGM) return false;
+  const scope = CONFIG.flagScope;
+  const clean = String(name ?? "").trim();
+  const data = readAreaData(scene);
+  if (!data.areas?.[label] || (data.areas[label].name ?? "") === clean) return false;
+  await writeAreaData(scene, setName(data, label, clean));
+
+  const tok = scene.tokens.find(t => t.flags?.[scope]?.areaMarker?.label === label);
+  if (!tok) return true;
+  const g = canvas.grid.size;
+  const fs = labelFontSize();
+  const locked = !!scene.getFlag(scope, "areasLocked");
+  // the marker's CENTRE must survive the resize: Redraw anchors this room's polygon
+  // to it, so a shift here would drag the whole zone across the map
+  const cx = tok.x + ((tok.width || 1) * g) / 2;
+  const cy = tok.y + ((tok.height || 1) * g) / 2;
+  await scene.updateEmbeddedDocuments("Token", [{
+    _id: tok.id,
+    name: formatLabel(label, clean),
+    ...labelTokenData(label, clean, { cx, cy, g, fs, locked }),
+    [`flags.${scope}.areaMarker.name`]: clean,
+    [`flags.${scope}.areaMarker.sig`]: labelSig(fs, locked)
+  }]);
+  return true;
 }
 
 // ---------- removal ----------

@@ -9,17 +9,19 @@ import { installRuntime, refresh as refreshVisibility } from "./runtime.mjs";
 import { installTooltip } from "./tooltip.mjs";
 import { hasLOS, tokenArea, areaAtPoint, distance } from "./los.mjs";
 import { readAreaData } from "./data.mjs";
-import { placeRoom, removeMarker, clearAllAreas, rectPoints, registerMarkerSheet, installMarkerHoverGuard } from "./marker.mjs";
-import { applyAreaEffect, removeAreaEffect, readAreaEffects } from "./effects.mjs";
+import { placeRoom, removeMarker, clearAllAreas, rectPoints, renameArea, registerMarkerSheet, installMarkerHoverGuard } from "./marker.mjs";
+import { applyAreaEffect, removeAreaEffect, readAreaEffects, restyleOutlines } from "./effects.mjs";
 import { initTrace } from "./trace.mjs";
 import { installEditor, registerControls, renderEditorInto, openEditorWindow } from "./editor.mjs";
+import { registerSettings } from "./settings.mjs";
+import { installLabels, rebuildLabels, refreshLabels } from "./labels.mjs";
 
 const MODULE_ID = "atlas";
 
 // The public API surface a host system (e.g. JLU's Editor) can call.
 const ATLAS = {
   id: MODULE_ID,
-  version: "0.3.0",
+  version: "0.5.0",
   get config() { return CONFIG; },
   configure,                                                   // configure({ flagScope, isOwnView, filterToken, extraAreas, ... })
   refresh() { return refreshVisibility(); },                   // force an immediate visibility recompute (after a host toggles a sense effect)
@@ -56,10 +58,15 @@ const ATLAS = {
   placeRoom(points, scene) { return placeRoom(scene ?? canvas.scene, points); },   // points = flat polygon [x,y,...]
   placeRect(x, y, w, h, scene) { return placeRoom(scene ?? canvas.scene, rectPoints(x, y, w, h)); },
   removeArea(label, scene) { return removeMarker(scene ?? canvas.scene, label); },
+  renameArea(label, name, scene) { return renameArea(scene ?? canvas.scene, label, name); },  // "" reverts to letter-only
   reset(scene) { return clearAllAreas(scene ?? canvas.scene); },                    // wipe a scene's areas (tokens+outlines+data)
   // --- editor (Phase 6) ---
   renderEditor(el, scene) { return renderEditorInto(el, scene ?? canvas.scene); },  // mount the panel into a host element
   openEditor() { return openEditorWindow(); },                                      // standalone window
+  // --- labels (opacity + size are user settings; these force an immediate apply) ---
+  rebuildLabels(scene) { return rebuildLabels(scene ?? canvas.scene); },            // redraw label textures at the current size slider
+  refreshLabels() { return refreshLabels(); },                                      // re-apply resting/hover opacity now
+  restyleOutlines(scene) { return restyleOutlines(scene ?? canvas.scene); },        // re-apply the overlay colour/opacity settings
 };
 
 // expose globally + on the module document (Foundry-recommended) so a host can call it
@@ -69,11 +76,18 @@ Hooks.once("init", () => {
   console.log("ATLAS | init");
   const mod = game.modules.get(MODULE_ID);
   if (mod) mod.api = ATLAS;
+  // label size moves the textures (a document rewrite) and overlay colour/opacity
+  // rewrites the outline Drawings; label opacity is per-client display only
+  registerSettings({
+    onRebuild: () => rebuildLabels(canvas.scene),
+    onRefresh: () => refreshLabels(),
+    onOverlay: () => restyleOutlines(canvas.scene)
+  });
 });
 
 // install the runtime once classes exist (before the canvas draws tokens), plus the hover readout,
 // the editor's live-refresh hook, the trace cleanup hook, and the GM scene-control button
-Hooks.once("setup", () => { installRuntime(); installTooltip(); installEditor(); initTrace(); installMarkerHoverGuard(); });
+Hooks.once("setup", () => { installRuntime(); installTooltip(); installEditor(); initTrace(); installMarkerHoverGuard(); installLabels(); });
 
 registerControls();
 

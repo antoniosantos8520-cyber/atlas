@@ -4,20 +4,36 @@
 // (movement costs, damage, blinding) are the host system's business, keyed by effect id.
 // GM-only writes; every write fires updateScene, so the fog runtime + editor refresh themselves for free.
 import { CONFIG } from "./config.mjs";
+import { overlayStyle } from "./settings.mjs";
 import { readAreaData, writeAreaData, layEffect, removeEffect, stackTint } from "./data.mjs";
 
-// the stock room-outline colors (drawRoomOutline's defaults) — restored when the stack empties
-const STOCK = { strokeColor: "#3d7bd0", strokeAlpha: 0.7, fillColor: "#3d7bd0", fillAlpha: 0.08 };
-
-// retint a room's outline drawing (tint = null → stock colors). Cosmetic + persisted (a Drawing document),
-// so every player sees the webbed / burning / smoky room.
+// retint a room's outline drawing (tint = null → the colour/opacity settings). Cosmetic + persisted
+// (a Drawing document), so every player sees the webbed / burning / smoky room.
 export async function tintRoom(scene, label, tint) {
   scene = scene ?? canvas.scene;
   const d = scene.drawings.find(dr => dr.flags?.[CONFIG.flagScope]?.areaRoom === label);
   if (!d) return;
-  await d.update(tint
-    ? { strokeColor: tint, strokeAlpha: 0.9, fillColor: tint, fillAlpha: 0.15 }
-    : { ...STOCK });
+  await d.update(overlayStyle(tint));
+}
+
+// Re-style every room outline on the scene from the CURRENT settings: a clean room takes the
+// colour picker, a dressed one keeps its top effect's tint. Called when either overlay setting
+// moves. GM-only; the Drawing updates replicate to everyone.
+export async function restyleOutlines(scene) {
+  scene = scene ?? canvas.scene;
+  if (!game.user?.isGM || !scene) return;
+  const scope = CONFIG.flagScope;
+  const data = readAreaData(scene);
+  const updates = [];
+  for (const d of scene.drawings) {
+    const label = d.flags?.[scope]?.areaRoom;
+    if (!label) continue;
+    updates.push({ _id: d.id, ...overlayStyle(stackTint(data.areas?.[label]?.effects, CONFIG.areaEffects)) });
+  }
+  if (updates.length) {
+    await scene.updateEmbeddedDocuments("Drawing", updates)
+      .catch((e) => console.warn("ATLAS | overlay restyle failed", e));
+  }
 }
 
 // retint from the CURRENT stack (most recently laid effect's tint wins; empty → stock)

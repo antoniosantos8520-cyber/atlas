@@ -2,8 +2,8 @@
 // In/Out/Through table. Mountable into a host element (ATLAS.renderEditor) OR opened as a standalone
 // window. `editorHTML` is a pure string builder (unit-tested); the rest is thin DOM/Foundry glue.
 import { CONFIG } from "./config.mjs";
-import { readAreaData, writeAreaData, toggleConnection, hasConnection, setLOS } from "./data.mjs";
-import { removeMarker, clearAllAreas, toggleLock, drawConnections, redrawAreas } from "./marker.mjs";
+import { readAreaData, writeAreaData, toggleConnection, hasConnection, setLOS, sortLabels } from "./data.mjs";
+import { removeMarker, clearAllAreas, toggleLock, drawConnections, redrawAreas, renameArea } from "./marker.mjs";
 import { startTrace, startBox } from "./trace.mjs";
 
 let _mounted = null;   // { el, scene } — the currently-shown editor (host-mounted or window content)
@@ -12,7 +12,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<":
 
 // ---------- pure HTML builder (testable) ----------
 export function editorHTML(data, locked = false) {
-  const labels = Object.keys(data?.areas || {}).sort();
+  const labels = sortLabels(Object.keys(data?.areas || {}));
   let h = `<div class="atlas-ed">`;
   h += `<div class="atlas-ed-bar">
       <button type="button" class="atlas-btn" data-atlas-action="trace" title="Click each corner of the room (any shape)"><i class="fa-solid fa-draw-polygon"></i> Trace</button>
@@ -28,13 +28,24 @@ export function editorHTML(data, locked = false) {
   h += `<div class="atlas-sec">Connections <small>line of travel — click to link rooms (draws a line on the map)</small></div>`;
   if (labels.length < 2) h += `<p class="atlas-empty">Trace at least 2 rooms to connect them.</p>`;
   else {
-    h += `<table class="atlas-matrix"><thead><tr><th></th>${labels.map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>`;
+    // the letter is the handle everywhere, but once a locked map stops showing letters
+    // the matrix is where you work out which room is which, so each header wears its name
+    const roomName = (l) => (data.areas[l]?.name ?? "").trim();
+    const head = (l) => (roomName(l) ? ` data-tooltip="${esc(roomName(l))}"` : "");
+    // A big matrix scrolls its own rails off screen, so every cell names the pair it
+    // toggles: hovering says "A ↔ G", or the room names when they have been given.
+    const pair = (r, c) => {
+      const one = (l) => (roomName(l) ? `${l}. ${roomName(l)}` : l);
+      return esc(`${one(r)} ↔ ${one(c)}`);
+    };
+    h += `<table class="atlas-matrix"><thead><tr><th></th>${labels.map(c => `<th${head(c)}>${c}</th>`).join("")}</tr></thead><tbody>`;
     for (const r of labels) {
-      h += `<tr><th>${r}</th>`;
+      h += `<tr><th${head(r)}>${r}</th>`;
       for (const c of labels) {
         if (r === c) { h += `<td class="self">—</td>`; continue; }
         const on = hasConnection(data, r, c);
-        h += `<td class="cell${on ? " on" : ""}" data-atlas-action="conn" data-a="${r}" data-b="${c}">${on ? "●" : "·"}</td>`;
+        h += `<td class="cell${on ? " on" : ""}" data-atlas-action="conn" data-a="${r}" data-b="${c}"`
+          + ` data-tooltip="${pair(r, c)}">${on ? "●" : "·"}</td>`;
       }
       h += `</tr>`;
     }
@@ -53,7 +64,11 @@ export function editorHTML(data, locked = false) {
   };
   for (const l of labels) {
     const a = data.areas[l];
-    const head = `${l}${a.name ? ` <span class="atlas-rn">${esc(a.name)}</span>` : ""}`;
+    // the name is EDITABLE here, and this is the only place it can be changed after
+    // tracing. Emptying it is a legal edit: the room reverts to a letter-only label.
+    const head = `${l} <input type="text" class="atlas-rn-in" data-atlas-name="${l}"`
+      + ` value="${esc(a.name ?? "")}" placeholder="unnamed"`
+      + ` data-tooltip="Name room ${l} — players see this. Clear it to go back to the letter alone.">`;
     h += `<tr><th class="atlas-roomhead">${head}</th>${cell(l, "losIn", a)}${cell(l, "losOut", a)}${cell(l, "losThrough", a)}`
       + `<td><button class="atlas-x" data-atlas-action="del" data-label="${l}" title="Delete room ${l} — removes it entirely and frees letter ${l} for reuse"><i class="fa-solid fa-trash-can"></i> Delete</button></td></tr>`;
   }
@@ -63,7 +78,18 @@ export function editorHTML(data, locked = false) {
 
 // ---------- mount + render ----------
 function renderContent(el, scene) {
+  // A rename writes the scene flag, which re-renders this panel from under the very
+  // input being typed in. Remember the caret and put it back so editing survives.
+  const active = document.activeElement;
+  const keep = active?.dataset?.atlasName && el.contains(active)
+    ? { label: active.dataset.atlasName, pos: active.selectionStart }
+    : null;
   el.innerHTML = editorHTML(readAreaData(scene), !!scene?.getFlag(CONFIG.flagScope, "areasLocked"));
+  if (!keep) return;
+  const next = el.querySelector(`[data-atlas-name="${keep.label}"]`);
+  if (!next) return;
+  next.focus();
+  try { next.setSelectionRange(keep.pos, keep.pos); } catch (_) { /* not a text input */ }
 }
 
 export function renderEditorInto(el, scene) {
@@ -73,8 +99,19 @@ export function renderEditorInto(el, scene) {
   if (!el._atlasBound) {
     el._atlasBound = true;
     el.addEventListener("click", (ev) => onEditorClick(ev));
+    // `change` fires on blur and on Enter, so a rename commits once, not per keystroke
+    el.addEventListener("change", (ev) => onEditorChange(ev));
+    el.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && ev.target?.dataset?.atlasName) { ev.preventDefault(); ev.target.blur(); }
+    });
   }
   renderContent(el, scene);
+}
+
+async function onEditorChange(ev) {
+  const input = ev.target.closest?.("[data-atlas-name]");
+  if (!input) return;
+  await renameArea(_mounted?.scene ?? canvas.scene, input.dataset.atlasName, input.value);
 }
 
 async function onEditorClick(ev) {

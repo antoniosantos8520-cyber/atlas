@@ -1,8 +1,12 @@
-// A.T.L.A.S. — the hover readout. Hover any room and see, from YOUR selected token's room,
-// the distance in rooms + whether you have line of sight. Pure helpers (bucket) are unit-tested;
-// the rest is canvas/DOM glue. No Foundry calls run at import (all inside functions).
+// A.T.L.A.S. — the hover readout. Hover any room with a token SELECTED and its LABEL wears the
+// range + LOS box (host ask 2026-09-02: the cursor-following tag was noise — the label already
+// names the room, so nothing shows without a selection, and the info sits where the eye already
+// is). Pure helpers (bucket) are unit-tested; the rest is canvas/DOM glue. No Foundry calls run
+// at import (all inside functions).
 import { CONFIG } from "./config.mjs";
 import { areaAtPoint, tokenArea, distance, hasLOS } from "./los.mjs";
+import { centroid } from "./marker.mjs";
+import { hoverArea } from "./labels.mjs";
 
 let _installed = false;
 let _throttle = 0;
@@ -17,6 +21,22 @@ export function bucket(dist) {
   if (dist <= 2) return "close";
   if (dist <= 4) return "mid";
   return "far";
+}
+
+/**
+ * The readout itself: range as "R2", sight as a Font Awesome eye. Open + green is
+ * clear, crossed + red is blocked. Two glyphs instead of "Range 2 · No LOS", which
+ * is the same information in a third of the width.
+ *
+ * An unreachable room keeps the SAME two slots (R∞ and a shut eye) rather than
+ * collapsing to a different shape, so the box never resizes as you sweep the map.
+ * PURE.
+ */
+export function readout(dist, los) {
+  const eye = (open) => `<i class="fa-solid fa-eye${open ? "" : "-slash"} atlas-los-${open ? "yes" : "no"}"></i>`;
+  return dist < 0
+    ? `<span class="atlas-tt-r">R∞</span>${eye(false)}`
+    : `<span class="atlas-tt-r">R${dist}</span>${eye(!!los)}`;
 }
 
 function peekAreaData() {
@@ -37,18 +57,44 @@ function highlightArea(points) {
   _hl.lineStyle(4, 0xffd54a, 0.95); _hl.drawPolygon(points);   // bumped, bright amber outline
 }
 function clearHighlight() { if (_hl) _hl.clear(); }
-function resetHover() { _lastHover = null; removeTooltip(); clearHighlight(); }
+function resetHover() { _lastHover = null; removeTooltip(); clearHighlight(); hoverArea(null); }
 
-function showTooltip(x, y, label, text, distClass) {
+// The hovered room's LABEL anchor in screen pixels: the marker token's top-center (its texture IS
+// the label box), the shape centroid when the marker is missing. Null hides the readout.
+function labelScreenPoint(label, data) {
+  const scope = CONFIG.flagScope;
+  const doc = canvas.scene?.tokens?.find?.(t => t.flags?.[scope]?.areaMarker?.label === label);
+  const tok = doc ? canvas.tokens?.get(doc.id) : null;
+  let wx, wy;
+  if (tok) { wx = tok.center?.x ?? tok.x; wy = tok.y; }
+  else {
+    const shape = data?.areas?.[label]?.shape;
+    if (!Array.isArray(shape) || shape.length < 6) return null;
+    ({ x: wx, y: wy } = centroid(shape));
+  }
+  const wt = canvas.stage.worldTransform;
+  return { x: wt.a * wx + wt.c * wy + wt.tx, y: wt.b * wx + wt.d * wy + wt.ty };
+}
+
+function placeTooltip(label, data) {
+  if (!_el) return;
+  const p = labelScreenPoint(label, data);
+  if (!p) return removeTooltip();
+  _el.style.left = `${p.x}px`;
+  _el.style.top = `${p.y}px`;
+}
+
+// The readout floats over the room's LABEL (never the cursor). No letter/name inside: the label
+// under it already says who the room is.
+function showTooltip(label, text, distClass, data) {
   removeTooltip();
   const el = document.createElement("div");
   el.id = "atlas-tooltip";
   el.className = `atlas-dist-${distClass}`;
-  el.innerHTML = `<span class="atlas-tt-letter">${label}.</span>${text ? `<span>${text}</span>` : ""}`;
-  el.style.left = `${x}px`;
-  el.style.top = `${y}px`;
+  el.innerHTML = `<span>${text}</span>`;
   document.body.appendChild(el);
   _el = el;
+  placeTooltip(label, data);
 }
 
 function onPointerMove(event) {
@@ -70,23 +116,22 @@ function onPointerMove(event) {
   const world = event.getLocalPosition ? event.getLocalPosition(canvas.stage) : event.data.getLocalPosition(canvas.stage);
   const hovered = areaAtPoint(world.x, world.y, data.areas);
   if (!hovered) { if (_lastHover) resetHover(); return; }
-  if (hovered === _lastHover) return;        // same room → keep the current readout + highlight
+  if (hovered === _lastHover) {              // same room → keep the readout, re-pin it to the label
+    placeTooltip(hovered, data);             // (a right-drag pan moves the label under a live readout)
+    return;
+  }
   _lastHover = hovered;
+  hoverArea(hovered);                        // this room's LABEL comes up to full opacity
   highlightArea(data.areas[hovered]?.shape); // lift + brighten this room's outline
 
   const ctrl = canvas.tokens.controlled[0];
-  if (!ctrl) { showTooltip(sx, sy, hovered, "", "none"); return; }            // nothing selected → just the letter
+  if (!ctrl) { removeTooltip(); return; }    // nothing selected → highlight only; the label already names the room
   const myArea = tokenArea(ctrl.center.x, ctrl.center.y, data.areas);         // your token is always in an area
-  if (!myArea) { showTooltip(sx, sy, hovered, "", "none"); return; }
-  if (myArea === hovered) { removeTooltip(); return; }   // your own room → highlight only, no "You are here" tooltip
+  if (!myArea || myArea === hovered) { removeTooltip(); return; }   // your own room → highlight only
 
   const dist = distance(data.connections || [], myArea, hovered);
   const los = hasLOS(data.connections || [], myArea, hovered, data.areas);
-  // colour the LOS word by clear/blocked so "No LOS" reads red (green never falsely reads "all good")
-  const text = dist < 0
-    ? `<span class="atlas-los-no">No path</span>`
-    : `Range ${dist} · ${los ? `<span class="atlas-los-yes">LOS</span>` : `<span class="atlas-los-no">No LOS</span>`}`;
-  showTooltip(sx, sy, hovered, text, bucket(dist));
+  showTooltip(hovered, readout(dist, los), bucket(dist), data);
 }
 
 export function installTooltip() {
