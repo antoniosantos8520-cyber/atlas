@@ -1,0 +1,7 @@
+# This tree is LF and stays LF.
+#
+# core.autocrlf is true on this machine and there was no attributes file, so git
+# was about to rewrite every source file to CRLF on the next checkout, stash or
+# restore. The index has always been LF; this pins the working copy to match.
+
+* text=auto eol=lf
