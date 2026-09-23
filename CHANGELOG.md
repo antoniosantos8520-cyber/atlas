@@ -62,6 +62,8 @@ Newest first. A version heading is dated on the day it was released; an unreleas
 
 - This repository is pinned to LF endings by a `.gitattributes`. On a machine with
   `core.autocrlf` enabled, git was one checkout away from rewriting every source file.
+- The build plan for the next version, a node control window and a movement restrictor, is in
+  `docs/0.6.0-build.md`, with the decisions that govern it.
 
 ---
 
