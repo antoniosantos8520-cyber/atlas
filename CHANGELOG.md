@@ -47,6 +47,13 @@ Newest first. A version heading is dated on the day it was released; an unreleas
 
 ### Fixed
 
+- **Tokens could be seen through walls.** In any world with the module enabled, on any scene with
+  no areas traced, a player saw every token that was not explicitly hidden. The visibility override
+  captured the wrong starting point: it reached past Foundry's Token class to the generic placeable
+  underneath, whose answer is "visible unless hidden", so Foundry's real sight test never ran and
+  walls stopped mattering. Zone fog itself was never affected; this only showed on the scenes the
+  module was not gating. The override now asks the Token class itself, and marks the getter it
+  installs so it can never mistake its own answer for the original.
 - **The module list showed mojibake.** `A.T.L.A.S. â€”` in the title and again in the description,
   from a dash that had been read in the wrong encoding and written back. The title now uses a colon
   and the description a comma.

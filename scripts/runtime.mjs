@@ -56,11 +56,24 @@ function localVisibleAreas() {
 }
 
 // ---- the per-client visibility override (the core trick) ----
+
+// Stamped on the getter we install, so a second install can recognise our own work.
+// Without it the capture below would take OUR getter as the base and recurse forever.
+const PATCHED = Symbol.for("atlas.isVisible");
+
 function installVisibilityOverride() {
   const proto = (globalThis.Token ?? foundry.canvas?.placeables?.Token)?.prototype;
   if (!proto) { console.warn("ATLAS | Token prototype not found — visibility override skipped"); return; }
-  _origIsVisible = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(proto), "isVisible")
-    || Object.getOwnPropertyDescriptor(proto, "isVisible");
+  // Ask the CLASS ITSELF first. Token defines its own isVisible, the real one that
+  // tests the sight polygons; PlaceableObject defines one too, and that one returns
+  // true for any token that is not hidden. Reaching up the prototype chain FIRST
+  // captures the permissive base and permanently shadows Token's getter, which turns
+  // wall-based token vision off on every scene this module does not gate. The chain
+  // is the fallback, for a Token class that stops defining its own.
+  const own = Object.getOwnPropertyDescriptor(proto, "isVisible");
+  if (own?.get?.[PATCHED]) return;                    // already installed
+  _origIsVisible = own
+    || Object.getOwnPropertyDescriptor(Object.getPrototypeOf(proto), "isVisible");
   if (!_origIsVisible?.get) { console.warn("ATLAS | isVisible getter not found — override skipped"); return; }
 
   Object.defineProperty(proto, "isVisible", {
@@ -83,6 +96,7 @@ function installVisibilityOverride() {
       }
     }
   });
+  Object.getOwnPropertyDescriptor(proto, "isVisible").get[PATCHED] = true;
 }
 
 // nudge Foundry to re-evaluate every token's visibility (re-reads isVisible)
