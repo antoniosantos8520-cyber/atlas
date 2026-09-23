@@ -6,7 +6,7 @@ A generic, **any-system** Foundry VTT module for **zone-based fog of war**. Inst
 
 Built for **tactical zone combat** — a real map and real token positioning, where the unit of position is the **room**, not the 5-foot square: you're in a zone or you're not, distance is measured in room-hops, sight runs zone to zone, and crossing a boundary is what movement *means*. Coarser grain than a grid, every bit as tactical. (It serves theatre-of-the-mind tables just as well, but it isn't limited to that.)
 
-> **New here?** The **[Keeper's Manual](docs/Atlas-Keepers-Manual.pdf)** is a 19-page illustrated walkthrough of the whole tool, with screenshots. It is the fastest way in.
+> **New here?** The **[User's Manual](docs/Atlas-Users-Manual.pdf)** is a 19-page illustrated walkthrough of the whole tool, with screenshots. It is the fastest way in.
 >
 > What changed, and when: **[CHANGELOG.md](CHANGELOG.md)**. The manifest is the authority on the current version.
 

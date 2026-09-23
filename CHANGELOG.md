@@ -178,6 +178,10 @@ was built and committed but never released.
 
 ### Changed
 
+- **The manual is the Atlas User's Manual**, `docs/Atlas-Users-Manual.pdf`, with a cover that says
+  what the module is instead of listing what it is not. It also stops calling you the Keeper: that
+  is one game system's word for the job, and this module does not care which system you run.
+
 - **Room labels stay still in normal play.** Hovering a room used to lift its name plate to full
   opacity, and hovering an UNNAMED room flashed a white box where its invisible label sits, because
   Foundry draws a token border from hover alone and knows nothing about the label being transparent.
