@@ -2,7 +2,7 @@
   "id": "atlas",
   "title": "Atlas: zone-based fog of war",
   "description": "Generic, any-system zone-based fog of war. Trace the rooms of a map, wire them together, and tokens hide and reveal per player as they move: no wall drawing, no light sources. Per-room In/Out/Through line of sight, doorways that block sight on one connection, blackout to hide a room from the table entirely, optional movement restricted to connected rooms, and stackable area effects (web/fire/smoke) that tint the room.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "compatibility": {
     "minimum": "13",
     "verified": "14"

@@ -11,7 +11,7 @@ Newest first. A version heading is dated on the day it was released; an unreleas
 
 ---
 
-## Unreleased
+## 1.0.1 (2026-09-23)
 
 ### Fixed
 

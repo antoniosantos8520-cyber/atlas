@@ -28,7 +28,7 @@ const ATLAS = {
   id: MODULE_ID,
   // ⚠ READ FROM THE MANIFEST, never a second copy. This shipped wrong once already: the literal
   //   said 0.3.0 against a 0.4.0 manifest, because a release bumped one and not the other.
-  get version() { return game.modules?.get(MODULE_ID)?.version ?? "1.0.0"; },
+  get version() { return game.modules?.get(MODULE_ID)?.version ?? "1.0.1"; },
   get config() { return CONFIG; },
   configure,                                                   // configure({ flagScope, isOwnView, filterToken, extraAreas, ... })
   refresh() { return refreshVisibility(); },                   // force an immediate visibility recompute (after a host toggles a sense effect)
