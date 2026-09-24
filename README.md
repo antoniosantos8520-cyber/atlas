@@ -20,7 +20,7 @@ Built for **tactical zone combat** on a real map, with real token positioning, w
 
 ### Drawing the map
 
-- **Square** (click-drag a rectangle) or **Line** (click the corners, any shape) traces a room. Both live on the room panel and in the Areas editor.
+- **Square** (click-drag a rectangle) or **Line** (click the corners, any shape) traces a room. Both live on the room panel and in the Areas editor. On the panel the tool you are using stays lit until the shape lands; press it again to stop.
 - **Name** a room and its name becomes the player-facing boxed label. A room you **don't** name carries no label at all, so a battlemap cut into a dozen areas isn't carpeted in letters. The letter still lives in the data, for the connection matrix and for any host system's own map.
 - **Redraw** replaces a room's outline while keeping its name, sight settings, effects, blackout, connections and doorways. A room traced badly doesn't have to be rebuilt.
 - **Move mode** picks a room up from anywhere inside it. Labels move independently, so a name plate sits where it reads best rather than where the room happens to be.

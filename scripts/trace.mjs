@@ -14,6 +14,19 @@ let _box = null;     // box drag:      { graphics, startW, lastW, dragging }
 
 const COLOR = 0x3d7bd0;
 
+/**
+ * Which drawing tool is live right now, in the names the buttons wear: "square" (the box drag),
+ * "line" (the corner-by-corner trace), or null. A surface that shows those buttons lights the one
+ * that is running from this, so the answer has to come from here and nowhere else.
+ */
+export function liveTool() { return _box ? "square" : _trace ? "line" : null; }
+
+// ⚠ THE TOOL SAYS WHEN IT STARTS AND STOPS. It can end from inside itself (Enter, Escape, a
+//   right-click, a scene change) where no button was pressed, so a panel lighting the live tool has
+//   nothing to watch but this. Fired after every change of `liveTool()`, with the new answer.
+//   Guarded so the file still imports in Node, where there are no Hooks.
+function announce() { globalThis.Hooks?.callAll?.("atlasDrawTool", liveTool()); }
+
 function snapW(e) {
   const w = e.getLocalPosition(canvas.stage);
   return canvas.grid.getSnappedPoint({ x: w.x, y: w.y }, { mode: CONST.GRID_SNAPPING_MODES.VERTEX });
@@ -70,6 +83,7 @@ function teardown() {
   window.removeEventListener("keydown", onKey);
   try { _trace.graphics?.destroy?.(); } catch (_) {}
   _trace = null;
+  announce();
 }
 
 function cancel() { teardown(); ui.notifications?.info("Atlas: trace cancelled."); }
@@ -102,6 +116,12 @@ async function promptRoomName() {
 /** Is a modal drawing tool mid-gesture? A passive canvas listener keeps out of its way. */
 export function tracing() { return !!(_trace || _box); }
 
+/** Stop whichever tool is live, exactly as Escape would: the drawing is dropped, and says so. */
+export function cancelDrawing() {
+  if (_trace) cancel();
+  else if (_box) cancelBox();
+}
+
 export function startTrace({ onShape = null } = {}) {
   if (!canvas?.ready) { ui.notifications?.warn("Atlas: no active canvas."); return; }
   if (!game.user?.isGM) return;
@@ -112,6 +132,7 @@ export function startTrace({ onShape = null } = {}) {
   canvas.stage.addEventListener?.("pointerdown", onDown, { capture: true });
   canvas.stage.on?.("pointermove", onMove);
   window.addEventListener("keydown", onKey);
+  announce();
   ui.notifications?.info("Atlas: click the room's corners · Enter / right-click = finish · Backspace = undo · Esc = cancel.");
 }
 
@@ -161,6 +182,7 @@ function teardownBox() {
   window.removeEventListener("keydown", onBoxKey);
   try { _box.graphics?.destroy?.(); } catch (_) {}
   _box = null;
+  announce();
 }
 function cancelBox() { teardownBox(); ui.notifications?.info("Atlas: box cancelled."); }
 
@@ -175,6 +197,7 @@ export function startBox({ onShape = null } = {}) {
   canvas.stage.addEventListener?.("pointerup", onBoxUp, { capture: true });
   canvas.stage.on?.("pointermove", onBoxMove);
   window.addEventListener("keydown", onBoxKey);
+  announce();
   ui.notifications?.info("Atlas: click-drag a rectangle room · Esc = cancel.");
 }
 

@@ -20,12 +20,11 @@ import { renameArea, removeMarker, reshapeRoom, drawConnections } from "./marker
 import { setMoveMode, moveModeOn } from "./move-area.mjs";
 import { setPairMode, pairModeOn, pairPick } from "./pair.mjs";
 import { movementRestricted, setMovementRestricted } from "./settings.mjs";
-import { startTrace, startBox } from "./trace.mjs";
+import { startTrace, startBox, tracing, liveTool, cancelDrawing } from "./trace.mjs";
 import { retintFromData } from "./effects.mjs";
 import { roomCardHTML, mapRowHTML, cardTarget, committedEffects, esc } from "./room-card.mjs";
 import { areaAtPoint } from "./los.mjs";
 import { creatureAt } from "./hit.mjs";
-import { tracing } from "./trace.mjs";
 
 let _app = null;
 let _label = null;       // the room the panel is currently showing, null when it has none
@@ -34,6 +33,11 @@ let _label = null;       // the room the panel is currently showing, null when i
 //   it starts, because a GM who has armed two of them has no way to know which one their click just
 //   answered. Pair mode holds a single slot, so connect and doorway cannot both be live either.
 let _reshape = null;     // the room the next drawn shape REPLACES, or null: draw a NEW room
+// ⚠ THE ARM IS SPENT WHEN THE TOOL STARTS (see the draw handler), so while a redraw is being traced
+//   `_reshape` is already null and the pair would fall back to New with the drawing still in
+//   flight. This remembers what that drawing is FOR, so the card keeps Redraw lit until the shape
+//   lands. Set when this panel starts a tool, dropped the moment trace.mjs says the tool ended.
+let _live = null;        // { target: label|null } while a drawing this panel started is live
 
 /** The room the panel is on, for anything that needs to know (B3's retarget, tests). */
 export function panelLabel() { return _label; }
@@ -73,7 +77,7 @@ function emptyHTML(scene) {
         ? "Click any room on the map to bring its controls here."
         : "Draw the first room with Square or Line, then click inside it to bring its controls here."}</p>
     </div>
-    ${mapRowHTML({ label: null, draw: false, traffic: movementRestricted() })}
+    ${mapRowHTML({ label: null, draw: false, tool: liveTool(), traffic: movementRestricted() })}
   </div>`;
 }
 
@@ -92,7 +96,8 @@ function paint(content) {
       blackout: !!ctx.area.blackout,
       doorway: pairModeOn("doorway"),
       connect: pairModeOn("connect"),
-      draw: _reshape === ctx.label,
+      draw: _live ? _live.target === ctx.label : _reshape === ctx.label,
+      tool: liveTool(),
       traffic: movementRestricted(),
       move: moveModeOn(),
       remove: true,
@@ -144,6 +149,9 @@ async function onPanelClick(ev) {
     //    and the draw tools capture every press full stop, so with both live the first corner of a
     //    trace would also pick a room up. Connect would eat the same presses. Drawing wins, and
     //    both buttons go out to say so.
+    // ⚠ PRESSING THE LIVE TOOL STOPS IT, as pressing live Connect does. trace.mjs announces the
+    //   end and the panel repaints from that, so nothing is rendered here.
+    if (liveTool() === hit.how) { cancelDrawing(); return; }
     setMoveMode(false);
     setPairMode(null);
     // ⚠⚠ THE ARM IS SPENT THE MOMENT THE TOOL STARTS, and the room it named is captured here
@@ -156,10 +164,12 @@ async function onPanelClick(ev) {
     //   reshape whatever room happens to wear that letter wherever the GM has got to by then.
     //   trace.mjs already drops an unfinished drawing on canvasReady, so this is the belt to that
     //   brace rather than the only guard.
-    const target = _reshape;
+    // ⚠ SWITCHING TOOLS KEEPS THE AIM. The arm is spent when the first tool starts, so a GM who
+    //   armed Redraw, pressed Square, then thought better of it and pressed Line used to get a
+    //   trace that made a NEW room. A drawing in flight hands its purpose to the tool replacing it.
+    const target = liveTool() ? (_live?.target ?? null) : _reshape;
     const onScene = scene;
     _reshape = null;
-    _app?.render();
     const onShape = target
       ? async (points) => {
         if (canvas?.scene?.id !== onScene.id) return;   // another map now: the redraw is abandoned
@@ -170,6 +180,10 @@ async function onPanelClick(ev) {
       : null;
     if (hit.how === "square") startBox({ onShape });
     else startTrace({ onShape });
+    // ⚠ AFTER the start, not before: starting a tool first tears down any other, and the panel
+    //   hears that end and clears `_live`. Set here, it survives to the render below.
+    _live = { target };
+    _app?.render();
     return;
   }
 
@@ -217,6 +231,10 @@ async function onPanelClick(ev) {
 
   // the two halves of the draw pair that DO need a room; square and line ran above
   if (hit.kind === "draw") {
+    // ⚠ THE PAIR IS PRESSED BEFORE YOU DRAW. Pressed while a drawing is in flight, it drops that
+    //   drawing first: the pair says where the NEXT shape lands, and a trace already aimed at a
+    //   room cannot be re-aimed at a new one half way through. The tool's own toast says so.
+    if (liveTool()) cancelDrawing();
     if (hit.how === "redraw") { _reshape = _reshape === label ? null : label; _app?.render(); return; }
     if (hit.how === "new") { _reshape = null; _app?.render(); return; }
     return;
@@ -499,10 +517,19 @@ export function installRoomPanel() {
     _app.render({ window: { title: titleFor(_label) } });
   });
 
+  // ⚠ THE DRAWING TOOL ENDS WHERE NO BUTTON WAS PRESSED: Enter, Escape, a right-click, a scene
+  //   change. trace.mjs announces every start and end, and this is how the lit tool goes out, and
+  //   Redraw with it, the moment the shape lands or the drawing is dropped.
+  Hooks.on("atlasDrawTool", (tool) => {
+    if (!tool) _live = null;
+    refreshRoomPanel();
+  });
+
   // a new scene has its own rooms, and the label we were holding means nothing there
   Hooks.on("canvasReady", () => {
     _label = null;
     _reshape = null;                                    // another scene, another set of rooms
+    _live = null;
     setMoveMode(false);
     setPairMode(null);
     if (panelOpen()) _app.render({ window: { title: titleFor(null) } });

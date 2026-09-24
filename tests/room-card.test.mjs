@@ -564,6 +564,53 @@ test("New is the resting half of the pair, and Redraw arms over it", () => {
   assert.ok(!/class="atlas-mc-mb on" data-atlas-draw="new"/.test(armed), "and New goes out");
 });
 
+test("a live drawing tool is lit, and lights the half of the pair its shape is for", () => {
+  // ⚠ Before this the panel showed its RESTING state while a trace was in flight: Redraw went out
+  //   the moment a tool started, and Square and Line never lit at all (user, 2026-09-23: "the
+  //   +new, and square or line tools are not highlighting ... that tool should highlight similar
+  //   to connect does").
+  const fresh = withMap({ tool: "square" });
+  assert.match(fresh, /class="atlas-mc-mb armed" data-atlas-draw="square"/, "Square is live");
+  assert.match(fresh, /class="atlas-mc-mb" data-atlas-draw="line"/, "Line is not");
+  assert.match(fresh, /class="atlas-mc-mb armed" data-atlas-draw="new"/, "a new room: New lights with it");
+  assert.match(fresh, /class="atlas-mc-mb" data-atlas-draw="redraw"/, "and Redraw stays out");
+
+  const over = withMap({ draw: true, tool: "line" });
+  assert.match(over, /class="atlas-mc-mb armed" data-atlas-draw="line"/, "Line is live");
+  assert.match(over, /class="atlas-mc-mb" data-atlas-draw="square"/, "Square is not");
+  assert.match(over, /class="atlas-mc-mb armed" data-atlas-draw="redraw"/, "a redraw: Redraw stays lit until the shape lands");
+  assert.match(over, /class="atlas-mc-mb" data-atlas-draw="new"/, "and New is out");
+});
+
+test("with no tool live, neither tool is lit", () => {
+  for (const html of [withMap(), withMap({ draw: true }), withMap({ tool: null })]) {
+    assert.match(html, /class="atlas-mc-mb" data-atlas-draw="square"/);
+    assert.match(html, /class="atlas-mc-mb" data-atlas-draw="line"/);
+  }
+});
+
+test("a tool the row draws no button for lights nothing", () => {
+  const html = withMap({ tool: "hex" });
+  assert.match(html, /class="atlas-mc-mb" data-atlas-draw="square"/);
+  assert.match(html, /class="atlas-mc-mb" data-atlas-draw="line"/);
+  assert.match(html, /class="atlas-mc-mb on" data-atlas-draw="new"/, "and the pair rests as usual");
+});
+
+test("a live tool says what to do on the map, and for which room", () => {
+  assert.match(withMap({ tool: "square" }), /atlas-mc-arm[^<]*>Drag a rectangle on the map for a new room/);
+  assert.match(withMap({ draw: true, tool: "square" }), /atlas-mc-arm[^<]*>Drag a rectangle on the map for room B's new outline/);
+  assert.match(withMap({ tool: "line" }), /atlas-mc-arm[^<]*>Click the corners of a new room on the map/);
+  assert.match(withMap({ draw: true, tool: "line" }), /atlas-mc-arm[^<]*>Click the corners of room B's new outline on the map/);
+  // the drawing owns the map until it lands, so its note outranks the armed redraw's
+  assert.ok(!withMap({ draw: true, tool: "line" }).includes("Pick Square or Line"));
+});
+
+test("the live tool's tooltip says pressing it again stops it, as Connect's does", () => {
+  assert.match(withMap({ tool: "square" }), /Square is LIVE[^"]*Press this again, or Escape, to stop/);
+  assert.match(withMap({ tool: "line" }), /Line is LIVE[^"]*Press this again, or Escape, to stop/);
+  assert.ok(!withMap().includes("is LIVE"), "and says nothing of the sort at rest");
+});
+
 test("an armed control says so in words, not just in colour", () => {
   assert.match(withMap({ draw: true }), /atlas-mc-arm[^<]*>Pick Square or Line/);
   assert.match(withMap({ doorway: true }), /atlas-mc-arm[^<]*>Click a room, then another, to door or open/);
@@ -596,6 +643,13 @@ test("with no room, the row keeps the two draw tools and the traffic rule", () =
   assert.match(html, /data-atlas-draw="square"/);
   assert.match(html, /data-atlas-draw="line"/);
   assert.match(html, /data-atlas-traffic/);
+});
+
+test("with no room, a live tool still lights", () => {
+  // the first room on a fresh map is drawn from this very row, so it must show the tool running
+  const html = mapRowHTML({ label: null, draw: false, tool: "line", traffic: false });
+  assert.match(html, /class="atlas-mc-mb armed" data-atlas-draw="line"/);
+  assert.match(html, /class="atlas-mc-mb" data-atlas-draw="square"/);
 });
 
 test("with no room, the controls that NEED one are absent", () => {

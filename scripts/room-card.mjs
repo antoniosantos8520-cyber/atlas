@@ -70,34 +70,58 @@ export function effectShown(area, staged, id) {
  *                                   the map is picking rooms to join or cut.
  * @param {?boolean} [opts.draw]     null: no controls. false: the next shape is a NEW room. true:
  *                                   Redraw is armed and the next shape replaces this room.
+ * @param {?string}  [opts.tool]     the drawing tool that is LIVE on the map right now, "square" or
+ *                                   "line", or null when none is. It is lit, and so is the half of
+ *                                   the pair its shape is for, in the same amber Connect wears while
+ *                                   it is live: the next thing you do on the map is a drawing.
  * @param {?boolean} [opts.traffic]  null: no control. true: movement is held to the connections.
  * @returns {string}
  */
-export function mapRowHTML({ label = null, connect = null, draw = null, traffic = null } = {}) {
+export function mapRowHTML({ label = null, connect = null, draw = null, tool = null, traffic = null } = {}) {
   if (connect === null && draw === null && traffic === null) return "";
   const redrawing = draw === true;
   const joined = connect === true;
+  // ⚠ ONLY THE TWO NAMES THE BUTTONS WEAR light anything; a tool this row draws no button for is
+  //   nobody's business here.
+  const live = (tool === "square" || tool === "line") ? tool : null;
   const lit = (on, klass = " on") => (on ? klass : "");
   const mb = (how, icon, text, cls, hint) =>
     `<button type="button" class="atlas-mc-mb${cls}" data-atlas-draw="${how}" title="${esc(hint)}">
         <i class="fa-solid ${icon}"></i><span>${text}</span>
       </button>`;
 
+  // ⚠ WHILE A DRAWING IS LIVE the pair says which room it is for, in amber, because that is the
+  //   moment the answer matters: New is blue at rest, but a Square being dragged for a new room
+  //   lights New the same way it lights Square (user, 2026-09-23: "the +new ... not highlighting").
   const pair = (draw !== null && label) ? `
-      ${mb("new", "fa-plus", "New", lit(!redrawing), redrawing
-        ? "Go back to drawing NEW rooms, and leave this room's outline alone."
-        : "The next shape you draw becomes a new room. This is where the pair rests.")}
-      ${mb("redraw", "fa-arrows-rotate", "Redraw", lit(redrawing, " armed"), redrawing
-        ? `Armed: pick Square or Line and the shape you draw replaces room ${label}. Press this again to cancel.`
-        : `Retrace room ${label}: the next shape you draw REPLACES its outline. Its name, its sight settings, its effects and every connection to it stay exactly as they are.`)}` : "";
+      ${mb("new", "fa-plus", "New", live && !redrawing ? " armed" : lit(!redrawing), live
+        ? (redrawing
+          ? "Drop the drawing in flight and go back to drawing NEW rooms. This room's outline stays as it is."
+          : "Drawing a NEW room right now. Press this, or Redraw, to drop that drawing and start over.")
+        : redrawing
+          ? "Go back to drawing NEW rooms, and leave this room's outline alone."
+          : "The next shape you draw becomes a new room. This is where the pair rests.")}
+      ${mb("redraw", "fa-arrows-rotate", "Redraw", lit(redrawing, " armed"), live && redrawing
+        ? `Redrawing room ${label} right now: the shape you are making on the map replaces its outline. Press this again to drop that drawing and pick a tool again.`
+        : redrawing
+          ? `Armed: pick Square or Line and the shape you draw replaces room ${label}. Press this again to cancel.`
+          : `Retrace room ${label}: the next shape you draw REPLACES its outline. Its name, its sight settings, its effects and every connection to it stay exactly as they are.`)}` : "";
 
+  // ⚠ THE LIVE TOOL IS LIT, AND PRESSING IT AGAIN STOPS IT, exactly as Connect behaves (user,
+  //   2026-09-23: "the tool square or line that tool should highlight similar to connect does").
+  //   Without this the panel showed its resting state while a trace was in flight, and nothing on
+  //   it said a tool was running.
   const tools = draw === null ? "" : `
-      ${mb("square", "fa-vector-square", "Square", "", redrawing
-        ? `Drag a rectangle: it becomes room ${label}'s new outline.`
-        : "Drag a rectangle to make a room. The fast one.")}
-      ${mb("line", "fa-draw-polygon", "Line", "", redrawing
-        ? `Click the corners of room ${label}'s new outline. Enter or right-click finishes, Backspace undoes, Escape cancels.`
-        : "Click a room's corners. Enter or right-click finishes, Backspace undoes, Escape cancels.")}`;
+      ${mb("square", "fa-vector-square", "Square", lit(live === "square", " armed"), live === "square"
+        ? "Square is LIVE: drag a rectangle on the map. Press this again, or Escape, to stop."
+        : redrawing
+          ? `Drag a rectangle: it becomes room ${label}'s new outline.`
+          : "Drag a rectangle to make a room. The fast one.")}
+      ${mb("line", "fa-draw-polygon", "Line", lit(live === "line", " armed"), live === "line"
+        ? "Line is LIVE: click the corners on the map. Enter or right-click finishes, Backspace undoes. Press this again, or Escape, to stop."
+        : redrawing
+          ? `Click the corners of room ${label}'s new outline. Enter or right-click finishes, Backspace undoes, Escape cancels.`
+          : "Click a room's corners. Enter or right-click finishes, Backspace undoes, Escape cancels.")}`;
 
   // ⚠ CONNECT IS A MODE, NOT AN ARM (user, 2026-09-23: "we can leave the connect button live once
   //   it is pushed and the connection is made ... process continues until connect is toggled off").
@@ -154,12 +178,15 @@ export function mapRowHTML({ label = null, connect = null, draw = null, traffic 
  * @param {?boolean} [opts.draw]       null: no draw controls. false: the next shape drawn becomes
  *                                     a NEW room, which is where the pair rests. true: REDRAW is
  *                                     armed, so the next shape drawn replaces THIS room's outline.
+ * @param {?string}  [opts.tool]       the drawing tool live on the map right now, "square" or
+ *                                     "line", or null. Lit while it runs, with the half of the
+ *                                     pair its shape is for, and the note says what to do.
  * @param {?boolean} [opts.traffic]    null: no traffic control. true: movement is held to the
  *                                     connection matrix (red). false: tokens move freely (green).
  *                                     A world rule, not a property of this room.
  * @returns {string}
  */
-export function roomCardHTML(ctx, { staged, defs = {}, staging = true, rename = false, blackout = null, doorway = null, move = null, remove = null, connect = null, draw = null, traffic = null } = {}) {
+export function roomCardHTML(ctx, { staged, defs = {}, staging = true, rename = false, blackout = null, doorway = null, move = null, remove = null, connect = null, draw = null, tool = null, traffic = null } = {}) {
   const stage = readStage(staged);
   if (!ctx) {
     return `<div class="atlas-marker-card">
@@ -240,17 +267,24 @@ export function roomCardHTML(ctx, { staged, defs = {}, staging = true, rename = 
 
   const redrawing = draw === true;
   const joined = connect === true;
-  const mapRow = mapRowHTML({ label: ctx.label, connect, draw, traffic });
+  const live = (tool === "square" || tool === "line") ? tool : null;
+  const mapRow = mapRowHTML({ label: ctx.label, connect, draw, tool, traffic });
 
   // While armed, the card says so: a tool that has quietly changed what your next click means is
-  // the kind that makes people distrust the whole panel.
-  const armedNote = armed
-    ? `<p class="atlas-mc-arm">Click a room, then another, to door or open the connection between them. Right-click clears both slots.</p>`
-    : joined
-      ? `<p class="atlas-mc-arm">Click a room, then another, to join or cut them. Right-click clears both slots.</p>`
-      : redrawing
-        ? `<p class="atlas-mc-arm">Pick Square or Line, then draw room ${esc(ctx.label)}'s new outline.</p>`
-        : "";
+  // the kind that makes people distrust the whole panel. A drawing in flight comes first: it owns
+  // the map until it lands, whatever else was armed.
+  const drawn = redrawing ? `room ${esc(ctx.label)}'s new outline` : "a new room";
+  const armedNote = live === "square"
+    ? `<p class="atlas-mc-arm">Drag a rectangle on the map for ${drawn}. Escape cancels.</p>`
+    : live === "line"
+      ? `<p class="atlas-mc-arm">Click the corners of ${drawn} on the map. Enter or right-click finishes, Backspace undoes, Escape cancels.</p>`
+      : armed
+        ? `<p class="atlas-mc-arm">Click a room, then another, to door or open the connection between them. Right-click clears both slots.</p>`
+        : joined
+          ? `<p class="atlas-mc-arm">Click a room, then another, to join or cut them. Right-click clears both slots.</p>`
+          : redrawing
+            ? `<p class="atlas-mc-arm">Pick Square or Line, then draw room ${esc(ctx.label)}'s new outline.</p>`
+            : "";
 
   const hint = staging
     ? `<p class="atlas-mc-hint">Stage line-of-sight + effect changes, then Apply. ✕ discards.</p>`

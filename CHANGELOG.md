@@ -11,6 +11,31 @@ Newest first. A version heading is dated on the day it was released; an unreleas
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **The room panel shows which drawing tool is running.** Square or Line lights up in the same
+  amber Connect wears while it is live, and stays lit until the shape lands or the drawing is
+  dropped, however that happens: Enter, Escape, a right-click or a scene change. Pressing the lit
+  tool again stops it, as pressing live Connect does. Before this the panel went back to its
+  resting look the moment a tool started, and nothing on it said a drawing was in flight.
+- **New and Redraw follow the drawing.** While a shape is being drawn for a new room, New lights
+  with the tool; while it is being drawn over a room, Redraw stays lit until it lands, instead of
+  going out the moment the tool started and leaving New lit over a redraw. The note under the
+  room's name says what to do on the map and which room it is for.
+- **Switching tools mid-redraw keeps the redraw.** Redraw, then Square, then a change of mind to
+  Line used to trace a new room instead. The redraw now stays aimed at the same room across the
+  switch.
+
+### Changed
+
+- **New and Redraw are pressed before you draw.** Pressed while a drawing is in flight, either one
+  drops that drawing first, then takes effect. Pressing Redraw mid-redraw leaves Redraw armed, so a
+  tool can be picked again.
+
+---
+
 ## 1.0.0 (2026-09-23)
 
 The first release under the plain name, and the first the module is willing to call finished. What
