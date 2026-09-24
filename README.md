@@ -85,7 +85,7 @@ The module creates its own hidden marker actor in a folder named **"Atlas (do no
 |---|---|
 | Double-click inside a room | Opens the room panel on it |
 | Double-click a token | That token's sheet. The panel doesn't move |
-| Click inside a room | Re-points an open panel at it |
+| Click inside a room | Re-points an open panel at it, and that room stays lifted on the map |
 | Right-click, in Connect or Doorway mode | Clears both slots of the readout. A right *drag* still pans |
 | Escape | Cancels move mode, Connect, Doorway, or a pending redraw |
 

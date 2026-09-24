@@ -8,6 +8,7 @@ import { areaAtPoint, tokenArea, distance, hasLOS } from "./los.mjs";
 import { sightConnections } from "./data.mjs";
 import { centroid } from "./marker.mjs";
 import { hoverArea } from "./labels.mjs";
+import { drawLift } from "./active-room.mjs";
 
 let _installed = false;
 let _throttle = 0;
@@ -57,15 +58,12 @@ function peekAreaData() {
 
 function removeTooltip() { if (_el) { _el.remove(); _el = null; } }
 
-// lift + bump the hovered room's outline: an offset shadow line, then a brighter, thicker line on top
+// Lift the hovered room's outline. ⚠ The lift itself lives in active-room.mjs, which draws the
+// same one around the room the panel is holding: one look, one definition, no drift.
 function highlightArea(points) {
   if (!_hl) return;
   _hl.clear();
-  if (!Array.isArray(points) || points.length < 6) return;
-  const off = 5;
-  const shadow = points.map(v => v + off);                 // offset down-right → reads as "lifted"
-  _hl.lineStyle(5, 0x000000, 0.35); _hl.drawPolygon(shadow);
-  _hl.lineStyle(4, 0xffd54a, 0.95); _hl.drawPolygon(points);   // bumped, bright amber outline
+  drawLift(_hl, points);
 }
 function clearHighlight() { if (_hl) _hl.clear(); }
 function resetHover() { _lastHover = null; removeTooltip(); clearHighlight(); hoverArea(null); }

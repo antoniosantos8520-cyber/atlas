@@ -19,6 +19,8 @@ import {
 import { renameArea, removeMarker, reshapeRoom, drawConnections } from "./marker.mjs";
 import { setMoveMode, moveModeOn } from "./move-area.mjs";
 import { setPairMode, pairModeOn, pairPick } from "./pair.mjs";
+import { labelsAuthoring } from "./labels.mjs";
+import { showActiveRoom } from "./active-room.mjs";
 import { movementRestricted, setMovementRestricted } from "./settings.mjs";
 import { startTrace, startBox, tracing, liveTool, cancelDrawing } from "./trace.mjs";
 import { retintFromData } from "./effects.mjs";
@@ -84,6 +86,10 @@ function emptyHTML(scene) {
 function paint(content) {
   const scene = canvas?.scene;
   _label = resolveLabel(scene, _label);
+  // ⚠ HERE, not in the click handlers. This is the single point where _label is finally settled,
+  //   so every route that moves the panel (a click, a double click, a delete falling back, a scene
+  //   flag write repainting it) lands the halo in the same place with no extra wiring.
+  showActiveRoom(_label);
   const ctx = roomContext(scene, _label);
   // A rename writes the scene flag, which repaints this panel out from under the very field being
   // typed in. Remember where the caret was and put it back, exactly as the editor panel does.
@@ -246,7 +252,7 @@ async function onPanelClick(ev) {
   if (hit.kind === "connect" || hit.kind === "doorway") {
     const want = pairModeOn(hit.kind) ? null : hit.kind;
     if (want) setMoveMode(false);                       // two modes cannot both own the drag
-    setPairMode(want, label);                           // seeded with this room, so pair one is one click
+    setPairMode(want);                                  // ⚠ NEVER seeded: the first click is yours
     _app?.render();
     return;
   }
@@ -313,6 +319,8 @@ function PanelApp() {
     _onClose(options) {
       setMoveMode(false);
       setPairMode(null);
+      labelsAuthoring(false);                         // and the map goes quiet again
+      showActiveRoom(null);                           // including the halo
       _reshape = null;
       return super._onClose?.(options);
     }
@@ -371,6 +379,7 @@ export function refreshRoomPanel() {
 /** Open the panel, optionally straight onto a room. GM only. */
 export function openRoomPanel(label = null) {
   if (!game.user?.isGM) { ui.notifications?.warn("Atlas is GM-only."); return; }
+  labelsAuthoring(true);                              // every room shows its letter while you work
   const next = resolveLabel(canvas?.scene, label ?? _label);
   if (next !== _label) _reshape = null;               // same reason as retargetPanel: the arm names a room
   _label = next;

@@ -396,14 +396,34 @@ test("no doorway control unless the surface asks for one", () => {
 });
 
 test("idle, the control just offers itself", () => {
+  // ⚠ CHANGED 2026-09-24: the doorway moved into the In/Out/Through row and took their shape, so
+  //   it now carries atlas-mc-tog as well. It is a sight rule; those three are sight rules.
   const html = roomCardHTML(room(), { defs: DEFS, rename: true, doorway: false });
-  assert.match(html, /class="atlas-mc-door" data-atlas-doorway/);
+  assert.match(html, /class="atlas-mc-tog atlas-mc-door" data-atlas-doorway/);
   assert.doesNotMatch(html, /atlas-mc-arm/, "nothing is pending, so nothing is announced");
+});
+
+test("the doorway sits in the SIGHT row, not on the room's name row", () => {
+  const html = roomCardHTML(room(), { defs: DEFS, rename: true, doorway: false });
+  const row = /<div class="atlas-mc-los">([\s\S]*?)<\/div>/.exec(html);
+  assert.ok(row, "the sight row is there");
+  assert.ok(row[1].includes("data-atlas-doorway"), "and the doorway is inside it");
+  const head = /<div class="atlas-mc-room">([\s\S]*?)<\/div>/.exec(html);
+  assert.ok(!head[1].includes("data-atlas-doorway"), "and no longer on the name row");
+});
+
+test("four across, and the doorway reads its own state", () => {
+  const on = roomCardHTML(room(), { defs: DEFS, rename: true, doorway: true });
+  const off = roomCardHTML(room(), { defs: DEFS, rename: true, doorway: false });
+  assert.match(on, /atlas-mc-s">live</);
+  assert.match(off, /atlas-mc-s">off</);
+  // the other three still say ON/OFF, so the row reads as one family
+  assert.match(off, /atlas-mc-s">on</);
 });
 
 test("ARMED says so on the card, because it has changed what the next click means", () => {
   const html = roomCardHTML(room(), { defs: DEFS, rename: true, doorway: true });
-  assert.match(html, /class="atlas-mc-door armed" data-atlas-doorway/);
+  assert.match(html, /class="atlas-mc-tog atlas-mc-door armed" data-atlas-doorway/);
   assert.match(html, /atlas-mc-arm/);
   // ⚠ CHANGED 2026-09-23: Doorway became a sticky MODE like Connect, so the note stopped
   //   naming "the other side" of one doorway and started describing a run of them.
@@ -479,8 +499,8 @@ test("delete is LAST on the row, furthest from everything you press often", () =
   });
   const at = (a) => html.indexOf(a);
   assert.ok(at("data-atlas-delete") > at("data-atlas-blackout"));
-  assert.ok(at("data-atlas-delete") > at("data-atlas-doorway"));
   assert.ok(at("data-atlas-delete") > at("data-atlas-move"));
+  // ⚠ the doorway is no longer on this row at all, so it is no longer part of the ordering
   assert.ok(at("data-atlas-delete") > at("data-atlas-name"));
 });
 
@@ -625,10 +645,16 @@ test("Traffic is never grey: red when it is enforcing, green when it is not", ()
   assert.match(withMap({ traffic: false }), /atlas-mc-traffic go/);
 });
 
-test("the map row's tooltips name the room they act on", () => {
+test("Redraw names the room it acts on; the pair tools name no room at all", () => {
   const html = withMap();
-  assert.ok(html.includes("Retrace room B"), "Redraw says which room it would replace");
-  assert.ok(html.includes("Room B is picked for you as the first"), "Connect says where it starts");
+  assert.ok(html.includes("Retrace room B"), "Redraw DOES act on one room, and says which");
+  // ⚠⚠ CHANGED 2026-09-24. Connect and Doorway used to promise "Room B is picked for you as the
+  //    first". They must not: while a pair mode is live the panel stops re-targeting, so its room is
+  //    frozen at whatever you opened it from, and seeding it silently wired rooms at opposite ends
+  //    of a battlemap. A tooltip that promises a seed is a tooltip that will be wrong.
+  assert.ok(!html.includes("picked for you"), "no promise of a starting room");
+  assert.ok(html.includes("click the two rooms you want joined"), "Connect asks for both");
+  assert.ok(html.includes("click the two rooms whose connection you want blocked"), "Doorway asks for both");
 });
 
 // ---------------------------------------------------------------------------

@@ -11,6 +11,44 @@ Newest first. A version heading is dated on the day it was released; an unreleas
 
 ---
 
+## 1.0.2 (2026-09-24)
+
+### Added
+
+- **The room the panel is holding stays lifted on the map**, wearing the same outline a room gets
+  when you hover it, so the answer to "which room is my next press about to change" is on the map
+  instead of in a window's title bar. The two differ only in how long they last: the hover's follows
+  your cursor, the panel's holds until the panel moves or closes.
+
+### Changed
+
+- **Every room shows its letter while the room panel is open.** Rooms you have not named still carry
+  no label during play, but the pair tools name rooms by letter and a map of unnamed rooms showed
+  none of them, which made Connect and Doorway guesswork. The letters come back while you are
+  working and go again when you close the panel. Your screen only: a player never sees a letter
+  appear because you opened a window.
+- **The cursor fills the readout from the left.** The left slot is the start and the right is the
+  destination, and the room under your cursor always takes the leftmost empty slot. So an empty
+  readout over room B reads `B - ?`, and clicking B leaves it reading `B - ?`. It used to show the
+  hovered room on the right and then move it to the left when you clicked, so the letter appeared to
+  jump sideways under you.
+- **The doorway button moved into the In / Out / Through row**, as a fourth control, and the four
+  shrank to fit. Those three are this room's sight rules and a doorway is the sight rule on one
+  connection, so they belong together. It still wears amber rather than green when live, because
+  unlike the other three it is a mode and changes what your next click on the map does.
+
+### Fixed
+
+- **Connect and Doorway no longer assume which room you meant.** Arming either one used to put the
+  room the panel was showing into the first slot, to save a click. That was a bad trade. While
+  either tool is live the panel deliberately stops following your clicks, because those clicks are
+  answering the tool instead, so its room stays frozen at whatever you opened it from. Pressing
+  Connect, or switching from Connect to Doorway, then quietly re-seeded that stale room, and the
+  next click on a full battlemap joined two rooms at opposite ends of it. The only way to notice was
+  to go looking for the line, and the only way to fix it was to find it and cut it.
+  Both tools now start empty every time, including when you switch from one to the other. The first
+  click is always yours.
+
 ## 1.0.1 (2026-09-23)
 
 ### Fixed

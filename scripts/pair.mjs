@@ -15,8 +15,11 @@
 //
 // THE READOUT IS THE STATE. Two slots and a dash:
 //
-//   slot 1 is the room you have PICKED   (? until you pick one; the next click fills it)
-//   slot 2 is the room under the CURSOR  (? when the cursor is on no room)
+//   THE LEFT SLOT IS THE START, the right one is the destination, and the room under your cursor
+//   always fills the LEFTMOST EMPTY SLOT. So an empty readout hovering B reads `B - ?`, and clicking
+//   B leaves it reading `B - ?`: the letter you were pointing at does not jump sideways under you
+//   (user, 2026-09-24: "on a empty mouse it shows right side as the first and when clicked it sets
+//   that right letter into the left slot ... its a bit confusing this way").
 //
 // and when both are filled the verb says what the click would DO, because both kinds TOGGLE. A tool
 // whose one gesture does opposite things without saying which is how a GM cuts a corridor they meant
@@ -25,8 +28,15 @@
 // ⚠ ONE WRITE PER PAIR. The pick resets the instant a pair completes, so a double click on the second
 //   room cannot toggle the same thing twice and land back where it started.
 //
-// ⚠ RIGHT CLICK CLEARS BOTH SLOTS. Turning a mode on seeds the first slot with the room the panel is
-//   showing, which saves a click when that IS the room you want and is in the way when it is not.
+// ⚠ RIGHT CLICK CLEARS BOTH SLOTS, and every click of yours fills them. Nothing else does.
+//
+// ⚠⚠ A MODE NEVER ASSUMES A STARTING ROOM. Arming one used to seed the first slot with the room
+//   the panel was showing, to save a click. It cost far more than it saved (user, 2026-09-24): while
+//   a mode is live the panel STOPS re-targeting, because your clicks are answering the pair question
+//   instead, so its room is frozen at whatever you opened it from. Every press of Connect or Doorway
+//   then re-seeded that stale room, and on a full battlemap the next click silently wired two rooms
+//   at opposite ends of the map, which then had to be found and undone. One saved click is not worth
+//   a connection you did not ask for.
 import { CONFIG } from "./config.mjs";
 import {
   readAreaData, writeAreaData, toggleConnection, hasConnection, toggleDoorway, hasDoorway,
@@ -66,7 +76,15 @@ export function pairFrom() { return _from; }
  *   could not give: you found out by clicking and reading a warning.
  */
 export function readoutParts(kind, from, hover, pair = {}) {
-  const out = { a: from ?? "?", b: hover ?? "?", verb: "", tone: "" };
+  // ⚠ THE HOVER FILLS THE LEFTMOST EMPTY SLOT. With nothing picked it previews the START, which is
+  //   what the next click makes it, so the letter stays where it is when you click.
+  // ⚠ Hovering the room you have already picked leaves the right slot empty: it is not a pair, and
+  //   clicking it again lets it go.
+  const out = {
+    a: from ?? hover ?? "?",
+    b: (from && hover && hover !== from) ? hover : "?",
+    verb: "", tone: "",
+  };
   if (!from || !hover || from === hover) return out;
   if (kind === "connect") {
     out.verb = pair.connected ? "cut" : "join";
@@ -232,17 +250,21 @@ function disarm() {
  * ⚠ ONE AT A TIME BY CONSTRUCTION. There is a single slot, so arming one kind cannot leave the other
  *   live, and a click on the map can never be answering a question the GM did not mean to ask.
  *
+ * ⚠⚠ IT ALWAYS STARTS EMPTY, including when you switch from one kind to the other. The slot is
+ *    yours to fill and nothing fills it for you. See the note at the top of this file for what the
+ *    old convenience seed actually cost.
+ *
  * @param {?string} kind   "connect", "doorway", or null to stop
- * @param {?string} start  the room to seed as the first end, so the first pair is one click
  */
-export function setPairMode(kind, start = null) {
+export function setPairMode(kind) {
   const want = (kind && game.user?.isGM) ? kind : null;
   if (want === _kind) return _kind;
   const wasOff = _kind === null;
   _kind = want;
   if (!_kind) { disarm(); return _kind; }
   if (wasOff) arm();                    // switching kinds keeps the readout, and only swaps the icon
-  _from = start ?? null;
+  _from = null;
+  _hover = null;
   paint();
   return _kind;
 }

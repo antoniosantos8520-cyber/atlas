@@ -131,7 +131,7 @@ export function mapRowHTML({ label = null, connect = null, draw = null, tool = n
       <button type="button" class="atlas-mc-mb${lit(joined, " armed")}" data-atlas-connect
         title="${esc(joined
           ? "Connect is LIVE: click a room, then another, to join them, or to cut them if they are already joined. The readout by your cursor shows the pair. RIGHT-CLICK clears both slots, so you can start from a different room. Press this again, or Escape, to stop."
-          : `Wire rooms up by pointing at them: click here, then click two rooms to join them. Room ${label} is picked for you as the first (right-click clears it), and it stays live until you press it again, so a whole map goes in without coming back to this button. Two rooms already joined are cut loose instead, and any doorway on that connection goes with them.`)}">
+          : `Wire rooms up by pointing at them: click here, then click the two rooms you want joined. It stays live until you press it again, so a whole map goes in without coming back to this button. Two rooms already joined are cut loose instead, and any doorway on that connection goes with them. Right-click clears the pair and starts again.`)}">
         <i class="fa-solid fa-link"></i><span>Connect</span>
       </button>`;
 
@@ -249,10 +249,17 @@ export function roomCardHTML(ctx, { staged, defs = {}, staging = true, rename = 
         : "Move rooms: drag inside any room to move it. While this is on, dragging inside a room will not pan the map or move a token.")}"><i class="fa-solid fa-arrows-up-down-left-right"></i></button>`;
 
   const armed = doorway === true;
-  const door = doorway === null ? "" : `<button type="button" class="atlas-mc-door${armed ? " armed" : ""}" data-atlas-doorway
+  // ⚠ SHAPED LIKE A SIGHT TOGGLE, because it is one: the other three are this room's sight rules
+  //   and this is the sight rule on one connection. It wears AMBER rather than green when live,
+  //   because unlike them it is a MODE and changes what your next click on the map does.
+  const door = doorway === null ? "" : `<button type="button" class="atlas-mc-tog atlas-mc-door${armed ? " armed" : ""}" data-atlas-doorway
       title="${esc(armed
         ? `Doorway mode is LIVE: click a room, then another, to put a doorway on the connection between them, or take one off. The readout by your cursor shows the pair. RIGHT-CLICK clears both slots. Press this again, or Escape, to stop.`
-        : `Put doorways in by pointing at rooms: click here, then click two rooms and a sight block goes on the connection between them. Room ${ctx.label} is picked for you as the first (right-click clears it), and it stays live so a run of doors goes in without coming back to this button. Sight stops at a doorway; movement never does.`)}"><i class="fa-solid fa-door-closed"></i></button>`;
+        : `Put doorways in by pointing at rooms: click here, then click the two rooms whose connection you want blocked. It stays live so a run of doors goes in without coming back to this button. Sight stops at a doorway; movement never does. Right-click clears the pair and starts again.`)}">
+        <i class="fa-solid fa-door-closed"></i>
+        <span class="atlas-mc-t">Door</span>
+        <span class="atlas-mc-s">${armed ? "live" : "off"}</span>
+      </button>`;
 
   // ⚠ Last on the row, and it ASKS FIRST. This panel re-points itself when you click the map, so a
   //   one-press delete would sit a single stray click away from taking a room off the scene.
@@ -262,8 +269,8 @@ export function roomCardHTML(ctx, { staged, defs = {}, staging = true, rename = 
   const head = rename
     ? `<div class="atlas-mc-room">${mover}<b>${esc(ctx.label)}</b><input type="text" class="atlas-mc-name"
       data-atlas-name="${esc(ctx.label)}" value="${esc(ctx.name ?? "")}" placeholder="unnamed"
-      title="${esc(`Name room ${ctx.label}. Players see this. Clear it to go back to the letter alone.`)}">${door}${hide}${kill}</div>`
-    : `<div class="atlas-mc-room">${mover}<b>${esc(ctx.label)}</b>${ctx.name ? ` · ${esc(ctx.name)}` : ""}${door}${hide}${kill}</div>`;
+      title="${esc(`Name room ${ctx.label}. Players see this. Clear it to go back to the letter alone.`)}">${hide}${kill}</div>`
+    : `<div class="atlas-mc-room">${mover}<b>${esc(ctx.label)}</b>${ctx.name ? ` · ${esc(ctx.name)}` : ""}${hide}${kill}</div>`;
 
   const redrawing = draw === true;
   const joined = connect === true;
@@ -304,6 +311,7 @@ export function roomCardHTML(ctx, { staged, defs = {}, staging = true, rename = 
       ${tog("losIn", "In", "Can this room be seen INTO from outside?")}
       ${tog("losOut", "Out", "Can tokens in it see / shoot OUT?")}
       ${tog("losThrough", "Through", "Can sight pass THROUGH it to somewhere beyond?")}
+      ${door}
     </div>
     <div class="atlas-mc-sec">Effect</div>
     <div class="atlas-mc-fxrow">

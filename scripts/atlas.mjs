@@ -19,6 +19,7 @@ import { openRoomPanel, installRoomPanel, refreshRoomPanel } from "./room-panel.
 import { installBlackout } from "./blackout.mjs";
 import { installMoveArea } from "./move-area.mjs";
 import { installPairMode } from "./pair.mjs";
+import { installActiveRoom } from "./active-room.mjs";
 import { installLabels, rebuildLabels, refreshLabels } from "./labels.mjs";
 
 const MODULE_ID = "atlas";
@@ -28,7 +29,7 @@ const ATLAS = {
   id: MODULE_ID,
   // ⚠ READ FROM THE MANIFEST, never a second copy. This shipped wrong once already: the literal
   //   said 0.3.0 against a 0.4.0 manifest, because a release bumped one and not the other.
-  get version() { return game.modules?.get(MODULE_ID)?.version ?? "1.0.1"; },
+  get version() { return game.modules?.get(MODULE_ID)?.version ?? "1.0.2"; },
   get config() { return CONFIG; },
   configure,                                                   // configure({ flagScope, isOwnView, filterToken, extraAreas, ... })
   refresh() { return refreshVisibility(); },                   // force an immediate visibility recompute (after a host toggles a sense effect)
@@ -97,7 +98,7 @@ Hooks.once("init", () => {
 
 // install the runtime once classes exist (before the canvas draws tokens), plus the hover readout,
 // the editor's live-refresh hook, the trace cleanup hook, and the GM scene-control button
-Hooks.once("setup", () => { installRuntime(); installTooltip(); installEditor(); initTrace(); installMarkerHoverGuard(); installLabels(); installMovement(); installRoomPanel(); installBlackout(); installMoveArea(); installPairMode(); });
+Hooks.once("setup", () => { installRuntime(); installTooltip(); installEditor(); initTrace(); installMarkerHoverGuard(); installLabels(); installMovement(); installRoomPanel(); installBlackout(); installMoveArea(); installPairMode(); installActiveRoom(); });
 
 registerControls();
 

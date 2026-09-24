@@ -153,17 +153,12 @@
 .atlas-room-panel .atlas-mc-kill i { font-size: 12px; color: inherit; }
 .atlas-room-panel .atlas-mc-kill:hover { background: rgba(196,49,61,.5); border-color: #c4313d; color: #fff; }
 
-.atlas-room-panel .atlas-mc-door {
-  flex: none; width: 26px; height: 22px; padding: 0; line-height: 1;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12);
-  border-radius: 3px; box-shadow: none; color: #8d86a8; cursor: pointer;
-}
-.atlas-room-panel .atlas-mc-door i { font-size: 12px; color: inherit; }
-.atlas-room-panel .atlas-mc-door:hover { border-color: rgba(61,123,208,.6); color: #ece8fb; }
-.atlas-room-panel .atlas-mc-door.armed {
+/* The doorway, in the sight row. AMBER when live, never green: the other three are settings on this
+   room and this one is a MODE that changes what your next click on the map does. */
+.atlas-mc-tog.atlas-mc-door.armed {
   background: rgba(224,166,63,.18); border-color: #e0a63f; color: #e0a63f;
 }
+.atlas-mc-tog.atlas-mc-door.armed i { color: #e0a63f; }
 .atlas-room-panel .atlas-mc-arm {
   margin: 0 0 10px !important; font-size: 11px; color: #e0a63f;
 }
@@ -222,15 +217,17 @@
 .atlas-los-card .atlas-mc-room { font-size: 15px; font-weight: 800; margin-bottom: 2px; }
 .atlas-los-card .atlas-mc-room b { color: #5b9bff; }
 .atlas-mc-hint { margin: 0 0 12px !important; font-size: 11px; opacity: .7; }
-.atlas-mc-los { display: flex; gap: 8px; }
+/* FOUR across now, not three: the doorway sits with the sight rules because it is one. Everything
+   here is a notch smaller than it was so the fourth fits without the row wrapping. */
+.atlas-mc-los { display: flex; gap: 5px; }
 .atlas-mc-tog {
-  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
-  padding: 10px 6px; border-radius: 8px; cursor: pointer;
+  flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 7px 2px; border-radius: 8px; cursor: pointer;
   background: #15131e; border: 1px solid rgba(255,255,255,.14); color: #8d86a8;
 }
-.atlas-mc-tog i { font-size: 18px; }
-.atlas-mc-tog .atlas-mc-t { font-weight: 800; font-size: 12px; }
-.atlas-mc-tog .atlas-mc-s { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; opacity: .8; }
+.atlas-mc-tog i { font-size: 15px; }
+.atlas-mc-tog .atlas-mc-t { font-weight: 800; font-size: 11px; white-space: nowrap; }
+.atlas-mc-tog .atlas-mc-s { font-size: 9px; text-transform: uppercase; letter-spacing: .6px; opacity: .8; }
 .atlas-mc-tog:hover { border-color: #3d7bd0; }
 .atlas-mc-tog.on { background: rgba(76,175,80,.16); border-color: #4caf50; color: #cdeccd; }
 .atlas-mc-tog.on i, .atlas-mc-tog.on .atlas-mc-s { color: #7fe08c; }

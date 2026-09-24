@@ -4,7 +4,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readoutParts, pairModeOn, pairFrom, clearSlots } from "../scripts/pair.mjs";
+import { readoutParts, pairModeOn, pairFrom, clearSlots, setPairMode } from "../scripts/pair.mjs";
 
 const parts = (kind, from, hover, pair) => readoutParts(kind, from, hover, pair);
 
@@ -12,10 +12,21 @@ const parts = (kind, from, hover, pair) => readoutParts(kind, from, hover, pair)
 // the two slots
 // ---------------------------------------------------------------------------
 
-test("slot 1 is what you picked, slot 2 is what is under the cursor", () => {
+test("the cursor fills the LEFTMOST EMPTY slot, so a letter never jumps sideways", () => {
+  // ⚠⚠ CHANGED 2026-09-24. It used to put the hovered room on the RIGHT with nothing picked, and
+  //    then move it to the LEFT the instant you clicked, which read as the letter jumping under you
+  //    (user: "it sets that right letter into the left slot ... its a bit confusing this way").
   assert.deepEqual(parts("connect", null, null), { a: "?", b: "?", verb: "", tone: "" });
+  assert.deepEqual(parts("connect", null, "B"), { a: "B", b: "?", verb: "", tone: "" },
+    "nothing picked: the hover previews the START");
+  assert.deepEqual(parts("connect", "B", "B"), { a: "B", b: "?", verb: "", tone: "" },
+    "and clicking it leaves the readout exactly as it was");
   assert.deepEqual(parts("connect", "A", null), { a: "A", b: "?", verb: "", tone: "" });
-  assert.deepEqual(parts("connect", null, "B"), { a: "?", b: "B", verb: "", tone: "" });
+});
+
+test("once a start is picked, the cursor fills the DESTINATION", () => {
+  assert.deepEqual(parts("connect", "A", "B", { connected: false }),
+    { a: "A", b: "B", verb: "join", tone: "join" });
 });
 
 test("a verb needs BOTH slots, never one", () => {
@@ -87,4 +98,53 @@ test("clearing does nothing when no mode is running", () => {
 
 test("an unknown kind is treated as neither", () => {
   assert.equal(pairModeOn("nonsense"), false);
+});
+
+// ---------------------------------------------------------------------------
+// arming never fills a slot for you
+// ---------------------------------------------------------------------------
+
+// setPairMode reads game.user, and on the way on it reaches for canvas.
+// ⚠ `canvas?.ready` still THROWS when canvas is an undeclared identifier: optional chaining
+//   guards a null value, not a missing binding. Declaring it null is what makes arm() bail the way
+//   it would before a scene is drawn, which is exactly the path these tests want to walk.
+globalThis.game = { user: { isGM: true } };
+globalThis.canvas = null;
+
+test("arming a mode leaves BOTH slots empty", () => {
+  setPairMode(null);
+  assert.equal(setPairMode("connect"), "connect");
+  assert.equal(pairFrom(), null, "nothing is picked for you");
+  setPairMode(null);
+});
+
+test("⚠⚠ SWITCHING TOOLS does not seed the slot either", () => {
+  // The reported bug, 2026-09-24: open the panel on C, wire C to D, switch to Doorway, and the tool
+  // had quietly put C back in slot 1. On a battlemap the next click then joined two rooms a screen
+  // apart, and the only way to notice was to go looking for the line.
+  setPairMode(null);
+  setPairMode("connect");
+  assert.equal(pairFrom(), null);
+  setPairMode("doorway");
+  assert.equal(pairModeOn("doorway"), true, "the switch took");
+  assert.equal(pairModeOn("connect"), false, "and only one is live");
+  assert.equal(pairFrom(), null, "and the slot is still yours to fill");
+  setPairMode(null);
+});
+
+test("turning a mode off and on again starts clean", () => {
+  setPairMode(null);
+  setPairMode("connect");
+  setPairMode(null);
+  assert.equal(pairModeOn(), false);
+  setPairMode("connect");
+  assert.equal(pairFrom(), null);
+  setPairMode(null);
+});
+
+test("a player cannot arm either tool", () => {
+  globalThis.game = { user: { isGM: false } };
+  assert.equal(setPairMode("connect"), null);
+  assert.equal(pairModeOn(), false);
+  globalThis.game = { user: { isGM: true } };
 });

@@ -22,6 +22,7 @@ import { labelTokenData, labelSig } from "./marker.mjs";
 
 let _hovered = null;      // the room label the cursor is currently over (from tooltip.mjs)
 let _movable = false;     // is move mode running? (pushed in by move-area.mjs)
+let _authoring = false;   // is the room panel open? (pushed in by room-panel.mjs)
 
 /**
  * Move mode started or stopped. Labels answer the pointer only while it is on.
@@ -37,6 +38,22 @@ export function labelsMovable(on) {
   return _movable;
 }
 
+/**
+ * The room panel opened or closed. While it is open, EVERY room shows its letter, named or not.
+ *
+ * ⚠⚠ THIS IS THE AUTHORING VIEW, and it is per client and GM only by construction: the panel is
+ *    GM only, and this state lives in one browser. A player never sees a letter appear because you
+ *    opened a window. Without it the pair tools were unusable on a map of unnamed rooms: the readout
+ *    names rooms by letter and the map showed none of them (user, 2026-09-24).
+ */
+export function labelsAuthoring(on) {
+  const next = !!on;
+  if (next === _authoring) return _authoring;
+  _authoring = next;
+  refreshLabels();
+  return _authoring;
+}
+
 const markerOf = (doc) => doc?.flags?.[CONFIG.flagScope]?.areaMarker ?? null;
 
 /** Has this room been given a name? The one definition, shared with hit.mjs's label pick. */
@@ -46,11 +63,14 @@ const isLocked = (scene) => !!scene?.getFlag?.(CONFIG.flagScope, "areasLocked");
 /**
  * The alpha this label should be wearing right now, or null if it isn't a label.
  *
- * ⚠ AN UNNAMED ROOM HAS NO LABEL AT ALL, for anybody, at any time (user, 2026-09-23: "anytime i
- *   draw a room and do not name it we do not need a lable box for it"). A battlemap traced into a
- *   dozen rooms should not be carpeted in letters nobody needs, and the letter is not lost: it
- *   still lives in the room's data, so the almanac's node map and the editor's matrix both keep it.
- *   Name the room and its label appears.
+ * ⚠ AN UNNAMED ROOM HAS NO LABEL AT PLAY (user, 2026-09-23: "anytime i draw a room and do not name
+ *   it we do not need a lable box for it"). A battlemap traced into a dozen rooms should not be
+ *   carpeted in letters nobody needs, and the letter is not lost: it still lives in the room's data.
+ *
+ * ⚠ UNLESS YOU ARE AUTHORING. With the room panel open the letters all come back, unnamed rooms
+ *   included, because that is when you need them: Connect and Doorway name rooms by letter, and a
+ *   map that shows none of them makes both tools guesswork (user, 2026-09-24). Close the panel and
+ *   the map goes quiet again.
  *
  * ⚠ The letter used to double as the GM's grab handle for moving a room. It no longer needs to:
  *   move mode picks a room up from anywhere inside it, and clicking anywhere inside one points the
@@ -62,13 +82,16 @@ const isLocked = (scene) => !!scene?.getFlag?.(CONFIG.flagScope, "areasLocked");
  *   Brightening a name plate answers the question "which one am I about to grab", and outside move
  *   mode nobody is grabbing anything: it is just the map twitching as the cursor crosses it.
  */
-export function targetAlpha(marker, { hovered = null, isGM = false, opacity = 1, blackout = false, movable = false } = {}) {
+export function targetAlpha(marker, { hovered = null, isGM = false, opacity = 1, blackout = false, movable = false, authoring = false } = {}) {
   if (!marker) return null;
   // ⚠ A hidden room has no label at the table, named or not, hovered or not. This is the FIRST
   //   test on purpose: every rule below it is about how prominent a label should be, and a blacked
   //   out room's label should not be there at all.
   if (blackout && !isGM) return 0;
-  if (!isNamed(marker)) return 0;
+  // ⚠ THE AUTHORING VIEW IS THE KEEPER'S ALONE. isGM is required as well as the flag, so that a
+  //   future caller cannot hand this to a player's client by accident.
+  const lettered = authoring && isGM;
+  if (!isNamed(marker) && !lettered) return 0;
   return (movable && marker.label && marker.label === hovered) ? 1 : opacity;
 }
 
@@ -83,6 +106,7 @@ function applyTo(token) {
     isGM: !!game.user?.isGM,
     opacity: labelOpacity(),
     movable: _movable,
+    authoring: _authoring,
     blackout: !!scene?.flags?.[CONFIG.flagScope]?.areaData?.areas?.[marker.label]?.blackout
   });
   // ⚠ ⚠ AND THE BORDER FOUNDRY DRAWS FOR US. Token#_refreshState sets border.visible from
